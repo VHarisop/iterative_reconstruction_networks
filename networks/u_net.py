@@ -36,7 +36,7 @@ class ConvBlock(nn.Module):
             nn.Conv2d(out_chans, out_chans, kernel_size=3, padding=1, bias=False),
             nn.InstanceNorm2d(out_chans),
             nn.LeakyReLU(negative_slope=0.2, inplace=True),
-            nn.Dropout2d(drop_prob)
+            nn.Dropout2d(drop_prob),
         )
 
     def forward(self, input):
@@ -67,7 +67,9 @@ class TransposeConvBlock(nn.Module):
         self.out_chans = out_chans
 
         self.layers = nn.Sequential(
-            nn.ConvTranspose2d(in_chans, out_chans, kernel_size=2, stride=2, bias=False),
+            nn.ConvTranspose2d(
+                in_chans, out_chans, kernel_size=2, stride=2, bias=False
+            ),
             nn.InstanceNorm2d(out_chans),
             nn.LeakyReLU(negative_slope=0.2, inplace=True),
         )
@@ -81,12 +83,14 @@ class TransposeConvBlock(nn.Module):
         """
         return self.layers(input)
 
+
 class ZerosNet(nn.Module):
     def __init__(self):
         super(ZerosNet, self).__init__()
 
     def forward(self, input):
-        return input*0.0 + 0.0
+        return input * 0.0 + 0.0
+
 
 class UnetModel(nn.Module):
     """
@@ -133,7 +137,8 @@ class UnetModel(nn.Module):
             nn.Sequential(
                 ConvBlock(ch * 2, ch, drop_prob),
                 nn.Conv2d(ch, self.out_chans, kernel_size=1, stride=1),
-            )]
+            )
+        ]
 
     def forward(self, input):
         """

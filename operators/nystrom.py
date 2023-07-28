@@ -8,19 +8,15 @@ from .operator import LinearOperator, SelfAdjointLinearOperator
 from typing import Set, Tuple
 
 
-class NystromFactoredOperator(LinearOperator):
+class NystromFactoredOperator(SelfAdjointLinearOperator):
+    factor: torch.Tensor
+
     def __init__(self, factor: torch.Tensor):
         super(NystromFactoredOperator, self).__init__()
         self.factor = factor
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.factor @ x
-
-    def adjoint(self, x: torch.Tensor) -> torch.Tensor:
-        return self.factor.T @ x
-
-    def shape(self) -> torch.Size:
-        return self.factor.shape
+        return self.factor.T @ (self.factor @ x)
 
 
 class NystromFactoredInverseOperator(SelfAdjointLinearOperator):
@@ -64,7 +60,7 @@ def nystrom_approx_factored(
         The left factor of the Nystrom approximation.
     """
     # Multiplication with a canonical basis vector.
-    def _mul_op_basis(idx: int) -> torch.Tensor:
+    def _mul_with_basis(idx: int) -> torch.Tensor:
         basis_vec = torch.zeros(dim, dtype=dtype, device=device)
         basis_vec[idx] = 1
         return operator.forward(basis_vec)
@@ -72,7 +68,7 @@ def nystrom_approx_factored(
     sample_probs = torch.zeros(dim, device=device, dtype=dtype)
     # Create the vector of sample probabilities
     for idx in range(dim):
-        sample_probs[idx] = torch.sum(_mul_op_basis(idx) ** 2)
+        sample_probs[idx] = torch.sum(_mul_with_basis(idx) ** 2)
     # Initialize Cholesky factor and list of pivots
     factor = torch.zeros(dim, rank, device=device, dtype=dtype)
     pivots = set()
@@ -83,7 +79,7 @@ def nystrom_approx_factored(
             logging.fatal(f"Problem with sampling: sample_probs={sample_probs}")
             # Re-throw ValueError
             raise ValueError(err.args)
-        res_vector = operator.adjoint(_mul_op_basis(sample_idx)) - (
+        res_vector = operator.adjoint(_mul_with_basis(sample_idx)) - (
             factor[:, :idx] @ factor[sample_idx, :idx]
         )
         factor[:, idx] = res_vector / torch.sqrt(res_vector[sample_idx])

@@ -31,9 +31,9 @@ class NeumannNet(nn.Module):
     def initial_point(self, y):
         return self._linear_adjoint(y)
 
-    def single_block(self, input):
+    def single_block(self, input_tensor):
         return (
-            input - self.eta * self.linear_op.gramian(input) - self.nonlinear_op(input)
+            input_tensor - self.eta * self.linear_op.gramian(input_tensor) - self.nonlinear_op(input_tensor)
         )
 
     def forward(self, y, iterations):
@@ -91,14 +91,14 @@ class PrecondNeumannNet(nn.Module):
         )
         return preconditioned_input
 
-    def single_block(self, input):
+    def single_block(self, input_tensor):
         preconditioned_step = conjugate_gradient(
-            input,
+            input_tensor,
             self.linear_op.gramian,
             regularization_lambda=self.eta,
             n_iterations=self.cg_iterations,
         )
-        return self.eta * preconditioned_step - self.nonlinear_op(input)
+        return self.eta * preconditioned_step - self.nonlinear_op(input_tensor)
 
     def forward(self, y, iterations):
         initial_point = self.eta * self.initial_point(y)

@@ -2,21 +2,14 @@ import argparse
 import torch
 import logging
 import os
-import random
-import sys
 
-from typing import Optional
-
-import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
 from torch.utils.data import TensorDataset
-from torchvision import transforms
 
-from operators.operator import LinearOperator, OperatorPlusNoise
+from operators.operator import LinearOperator
 from networks.relu_net import ReluNet
 from solvers.neumann import NeumannNet
-from training import standard_training
 
 parser = argparse.ArgumentParser(
     description="A synthetic experiment using Neumann networks to recover vectors lying on a union of subspaces."
@@ -58,7 +51,7 @@ parser.add_argument(
 )
 # Checkpointing options
 parser.add_argument("--log_frequency", type=int, default=10)
-parser.add_argument("--logfile", type=Optional[str])
+parser.add_argument("--logfile", type=str)
 parser.add_argument("--save_frequency", type=int, default=5)
 parser.add_argument("--save_location", type=str, default=os.getenv("HOME"))
 # CUDA
@@ -100,6 +93,7 @@ def generate_vectors(
     assert betas.shape == torch.Size([num_samples, dim, 1])
     return betas[:, :, 0]
 
+
 # Set up data and dataloaders
 train_dataset = TensorDataset(
     generate_vectors(args.dim, args.rank, args.num_subspaces, args.num_train_samples)
@@ -124,18 +118,33 @@ test_loader = DataLoader(
 # Set up solver and problem setting
 # Here, the forward operator is just a coordinate selection operator.
 # Its adjoint is given by appending the complementary number of zeros.
-forward_operator = LinearOperator()
-forward_operator.forward = lambda x: x[:, :args.keep_coords]
-forward_operator.adjoint = lambda y: torch.cat(
-    (
-        y,
-        torch.zeros(
-            y.shape[0], args.dim - args.keep_coords,
-            device=_DEVICE_, dtype=torch.float
-        ),
-    ),
-    dim=1,
-)
+
+
+class ForwardOperator(LinearOperator):
+    def __init__(self, dim: int, keep_coords: int):
+        super().__init__()
+        self.dim = dim
+        self.keep_coords = keep_coords
+
+    def forward(self, x: torch.Tensor):
+        return x[:, : self.keep_coords]
+
+    def adjoint(self, x: torch.Tensor):
+        return torch.cat(
+            (
+                x,
+                torch.zeros(
+                    x.shape[0],
+                    self.dim - self.keep_coords,
+                    device=_DEVICE_,
+                    dtype=torch.float,
+                ),
+            ),
+            dim=1,
+        )
+
+
+forward_operator = ForwardOperator(args.dim, args.keep_coords)
 forward_operator = forward_operator.to(_DEVICE_)
 
 # A 7-layer ReLU net.
@@ -153,20 +162,6 @@ optimizer = optim.Adam(params=solver.parameters(), lr=args.learning_rate)
 scheduler = optim.lr_scheduler.StepLR(
     optimizer=optimizer, step_size=(args.learning_rate // 2), gamma=0.1
 )
-cpu_only = not torch.cuda.is_available()
-
-
-# if os.path.exists(args.save_location):
-#     if not cpu_only:
-#         saved_dict = torch.load(args.save_location)
-#     else:
-#         saved_dict = torch.load(args.save_location, map_location="cpu")
-#
-#     start_epoch = saved_dict["epoch"]
-#     solver.load_state_dict(saved_dict["solver_state_dict"])
-#     optimizer.load_state_dict(saved_dict["optimizer_state_dict"])
-#     scheduler.load_state_dict(saved_dict["scheduler_state_dict"])
-
 
 # set up loss and train
 lossfunction = torch.nn.MSELoss()

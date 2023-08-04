@@ -27,21 +27,19 @@ class NeumannNet(nn.Module):
     def _linear_adjoint(self, x):
         return self.linear_op.adjoint(x)
 
-    # This is a bit redundant
-    def initial_point(self, y):
-        return self._linear_adjoint(y)
-
     def single_block(self, input_tensor):
         return (
-            input_tensor - self.eta * self.linear_op.gramian(input_tensor) - self.nonlinear_op(input_tensor)
+            input_tensor
+            - self.eta * self.linear_op.gramian(input_tensor)
+            - self.nonlinear_op(input_tensor)
         )
 
     def forward(self, y, iterations):
-        initial_point = self.eta * self.initial_point(y)
+        initial_point = self.eta * self._linear_adjoint(y)
         running_term = initial_point
         accumulator = initial_point
 
-        for bb in range(iterations):
+        for _ in range(iterations):
             running_term = self.single_block(running_term)
             accumulator = accumulator + running_term
 
@@ -81,11 +79,14 @@ class PrecondNeumannNet(nn.Module):
     def _linear_adjoint(self, x):
         return self.linear_op.adjoint(x)
 
+    def _linear_gramian(self, x):
+        return self.linear_op.gramian(x)
+
     # This is a bit redundant
     def initial_point(self, y):
         preconditioned_input = conjugate_gradient(
-            y,
-            self.linear_op.gramian,
+            self._linear_adjoint(y),
+            self._linear_gramian,
             regularization_lambda=self.eta,
             n_iterations=self.cg_iterations,
         )
@@ -94,7 +95,7 @@ class PrecondNeumannNet(nn.Module):
     def single_block(self, input_tensor):
         preconditioned_step = conjugate_gradient(
             input_tensor,
-            self.linear_op.gramian,
+            self._linear_gramian,
             regularization_lambda=self.eta,
             n_iterations=self.cg_iterations,
         )
@@ -105,7 +106,7 @@ class PrecondNeumannNet(nn.Module):
         running_term = initial_point
         accumulator = initial_point
 
-        for bb in range(iterations):
+        for _ in range(iterations):
             running_term = self.single_block(running_term)
             accumulator = accumulator + running_term
 

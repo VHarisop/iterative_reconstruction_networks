@@ -8,9 +8,9 @@ def complex_conj(x):
 
 
 def torchdotproduct(x, y):
-    # if complexdata:
-    # y = complex_conj(y)
-    return torch.sum(x * y, dim=[1, 2, 3])
+    return torch.sum(
+        x.view(x.shape[0], -1) * y.view(y.shape[0], -1), dim=1
+    )
 
 
 def single_cg_iteration(x, d, g, b, ATA, regularization_lambda):
@@ -20,13 +20,13 @@ def single_cg_iteration(x, d, g, b, ATA, regularization_lambda):
     Qd = regATA(d, ATA)
     dQd = torchdotproduct(d, Qd)
     alpha = -torchdotproduct(g, d) / dQd
-    alpha = alpha.view((-1, 1, 1, 1))
-    x = x + alpha * d
+    # We write (x * y.T).T since broadcasting is along the last dimension.
+    x = x + (alpha * d.T).T
     g = regATA(x, ATA) - b
     gQd = torchdotproduct(g, Qd)
     beta = gQd / dQd
-    beta = beta.view((-1, 1, 1, 1))
-    d = -g + beta * d
+    # We write (x * y.T).T since broadcasting is along the last dimension.
+    d = -g + (beta * d.T).T
     return x, d, g
 
 
@@ -36,7 +36,7 @@ def conjugate_gradient(initial_point, ATA, regularization_lambda, n_iterations=1
     x = torch.zeros_like(initial_point)
     d = initial_point
     g = -d
-    for ii in range(n_iterations):
+    for _ in range(n_iterations):
         x, d, g = single_cg_iteration(
             x, d, g, initial_point, ATA, regularization_lambda
         )

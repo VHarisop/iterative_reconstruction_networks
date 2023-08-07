@@ -1,5 +1,6 @@
 import torch
 
+
 class LinearOperator(torch.nn.Module):
     def __init__(self):
         super(LinearOperator, self).__init__()
@@ -13,13 +14,16 @@ class LinearOperator(torch.nn.Module):
     def gramian(self, x):
         return self.adjoint(self.forward(x))
 
+
 class SelfAdjointLinearOperator(LinearOperator):
     def adjoint(self, x):
         return self.forward(x)
 
+
 class Identity(SelfAdjointLinearOperator):
     def forward(self, x):
         return x
+
 
 class OperatorPlusNoise(torch.nn.Module):
     def __init__(self, operator, noise_sigma):

@@ -50,7 +50,7 @@ class SingleAngleMotionBlur(LinearOperator):
         else:
             print('KERNEL SIZE MUST BE A SINGLE INTEGER - RECTANGULAR KERNELS NOT SUPPORTED AT THIS TIME')
             exit()
-        self.blur_kernel = torch.nn.Parameter(self.create_gaussian_kernel(sigma, kernel_size, n_channels),
+        self.blur_kernel = torch.nn.Parameter(self.create_motionblur_kernel(sigma, kernel_size, n_channels),
                                               requires_grad=False)
 
     def create_motionblur_kernel(self, angle, kernel_size, n_channels):

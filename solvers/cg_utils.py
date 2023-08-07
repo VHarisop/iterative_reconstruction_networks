@@ -8,9 +8,7 @@ def complex_conj(x):
 
 
 def torchdotproduct(x, y):
-    return torch.sum(
-        x.view(x.shape[0], -1) * y.view(y.shape[0], -1), dim=1
-    )
+    return torch.sum(x.view(x.shape[0], -1) * y.view(y.shape[0], -1), dim=1)
 
 
 def single_cg_iteration(x, d, g, b, ATA, regularization_lambda):

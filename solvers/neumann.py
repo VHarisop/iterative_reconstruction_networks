@@ -1,5 +1,9 @@
-import torch.nn as nn
 import torch
+import torch.nn as nn
+
+from operators.nystrom import nystrom_approx_factored
+from operators.nystrom import NystromFactoredInverseOperator
+from operators.operator import LinearOperator
 from solvers.cg_utils import conjugate_gradient
 
 
@@ -107,6 +111,58 @@ class PrecondNeumannNet(nn.Module):
         accumulator = initial_point
 
         for _ in range(iterations):
+            running_term = self.single_block(running_term)
+            accumulator = accumulator + running_term
+
+        return accumulator
+
+
+class SketchedNeumannNet(nn.Module):
+    "A preconditioned Neumann network using a sketched version of X'X + λI."
+
+    def __init__(
+        self,
+        dim: int,
+        rank: int,
+        linear_operator: LinearOperator,
+        nonlinear_operator: nn.Module,
+        lambda_initial_val: float = 0.1,
+        iterations: int = 6,
+    ):
+        super(SketchedNeumannNet, self).__init__()
+        self.dim = dim
+        self.rank = rank
+        self.linear_op = linear_operator
+        self.nonlinear_op = nonlinear_operator
+        self.iterations = iterations
+
+        # Sketched gramian of the linear operator.
+        self.sketch_op, _ = nystrom_approx_factored(
+            self.linear_op,
+            self.dim,
+            self.rank,
+        )
+
+        # Check if the linear operator has parameters that can be learned:
+        # if so, register them to be learned as part of the network.
+        linear_param_name = "linear_param_"
+        for ii, parameter in enumerate(self.linear_op.parameters()):
+            parameter_name = linear_param_name + str(ii)
+            self.register_parameter(name=parameter_name, param=parameter)
+
+        self.eta = nn.Parameter(torch.tensor(lambda_initial_val), requires_grad=True)
+        self.inverse_op = NystromFactoredInverseOperator(self.sketch_op, self.eta)
+
+    def single_block(self, input_tensor: torch.Tensor) -> torch.Tensor:
+        return self.eta * self.inverse_op(input_tensor) - self.nonlinear_op(
+            input_tensor
+        )
+
+    def forward(self, input_tensor: torch.Tensor) -> torch.Tensor:
+        initial_point = self.eta * self.inverse_op(self.linear_op.adjoint(input_tensor))
+        running_term = initial_point
+        accumulator = initial_point
+        for _ in range(self.iterations):
             running_term = self.single_block(running_term)
             accumulator = accumulator + running_term
 

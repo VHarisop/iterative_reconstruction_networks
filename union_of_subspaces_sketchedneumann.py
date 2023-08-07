@@ -9,10 +9,10 @@ from torch.utils.data import TensorDataset
 
 from operators.operator import LinearOperator
 from networks.relu_net import ReluNet
-from solvers.neumann import NeumannNet
+from solvers.neumann import SketchedNeumannNet
 
 parser = argparse.ArgumentParser(
-    description="A synthetic experiment using Neumann networks to recover vectors lying on a union of subspaces."
+    description="A synthetic experiment using sketched preconditioned Neumann networks to recover vectors lying on a union of subspaces."
 )
 
 # Data options
@@ -20,6 +20,7 @@ parser.add_argument("--dim", help="The ambient dimension", type=int, default=10)
 parser.add_argument(
     "--rank", help="The dimension of each subspace", type=int, default=3
 )
+parser.add_argument("--sketch_rank", help="The sketch rank", type=int, default=5)
 parser.add_argument(
     "--num_subspaces", help="The number of subspaces", type=int, default=3
 )
@@ -168,10 +169,13 @@ forward_operator = forward_operator.to(_DEVICE_)
 # A 7-layer ReLU net.
 learned_component = ReluNet(dims=[args.dim, 10, 10, 6, 10, 10, args.dim])
 
-solver = NeumannNet(
+solver = SketchedNeumannNet(
+    dim=args.dim,
+    rank=args.sketch_rank,
     linear_operator=forward_operator,
     nonlinear_operator=learned_component,
-    eta_initial_val=args.algorithm_step_size,
+    lambda_initial_val=args.algorithm_step_size,
+    iterations=args.num_solver_iterations,
 )
 solver = solver.to(device=_DEVICE_)
 
@@ -200,7 +204,7 @@ for epoch in range(args.num_epochs):
         optimizer.zero_grad()
         sample_batch = sample_batch.to(device=_DEVICE_)
         y = forward_operator(sample_batch)
-        reconstruction = solver(y, iterations=args.num_solver_iterations)
+        reconstruction = solver(y)
 
         loss = lossfunction(reconstruction, sample_batch)
         loss.backward()

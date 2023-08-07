@@ -1,11 +1,11 @@
 import logging
+from typing import Set, Tuple
+
 import numpy as np
 from numpy.random import choice
 import torch
-import torch.linalg as linalg
-from .operator import LinearOperator, SelfAdjointLinearOperator
 
-from typing import Set, Tuple
+from .operator import LinearOperator, SelfAdjointLinearOperator
 
 
 class NystromFactoredOperator(SelfAdjointLinearOperator):
@@ -16,27 +16,36 @@ class NystromFactoredOperator(SelfAdjointLinearOperator):
         self.factor = factor
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.factor.T @ (self.factor @ x)
+        if len(x.shape) > 1:
+            # Treat the first dimension as the batch size.
+            return (x.view(x.shape[0], -1) @ self.factor) @ self.factor.T
+        else:
+            return self.factor @ (self.factor.T @ x)
 
 
 class NystromFactoredInverseOperator(SelfAdjointLinearOperator):
     """A linear operator implementing the inverse of (s * I + V @ V.T)."""
+
     U: torch.Tensor
     scale_vec: torch.Tensor
-    shift: float
+    shift: float | torch.Tensor
 
     @torch.no_grad()
-    def __init__(self, operator: NystromFactoredOperator, shift: float):
+    def __init__(self, operator: NystromFactoredOperator, shift: float | torch.Tensor):
         super(SelfAdjointLinearOperator, self).__init__()
         U, S, _ = torch.linalg.svd(operator.factor, full_matrices=False)
         self.U = U
-        self.scale_vec = (S ** 2) / (S ** 2 + shift)
+        self.scale_vec = (S**2) / (S**2 + shift)
         self.shift = shift
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return (1 / self.shift) * (
-            x - self.U @ (self.scale_vec * (self.U.T @ x))
-        )
+        if len(x.shape) > 1:
+            z = x.view(x.shape[0], -1)
+            return (1 / self.shift) * (
+                z - ((z @ self.U) * self.scale_vec) @ self.U.T
+            ).view(x.shape)
+        else:
+            return (1 / self.shift) * (x - self.U @ (self.scale_vec * (self.U.T @ x)))
 
 
 @torch.no_grad()
@@ -59,11 +68,12 @@ def nystrom_approx_factored(
     Returns:
         The left factor of the Nystrom approximation.
     """
+
     # Multiplication with a canonical basis vector.
     def _mul_with_basis(idx: int) -> torch.Tensor:
         basis_vec = torch.zeros(dim, dtype=dtype, device=device)
         basis_vec[idx] = 1
-        return operator.forward(basis_vec)
+        return operator(basis_vec)
 
     sample_probs = torch.zeros(dim, device=device, dtype=dtype)
     # Create the vector of sample probabilities

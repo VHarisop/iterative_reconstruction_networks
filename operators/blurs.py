@@ -1,3 +1,4 @@
+from typing import Sequence, Tuple
 import numpy as np
 import numbers
 import math
@@ -49,6 +50,59 @@ class GaussianBlur(LinearOperator):
     def adjoint(self, x):
         return torchfunc.conv2d(
             x, weight=self.gaussian_kernel, groups=self.groups, padding=self.padding
+        )
+
+    def conv_with_basis(self, dim: int, i: int, j: int):
+        """Compute the convolution with a 'basis' image.
+
+        The result of this operation is an image containing the kernel
+        centered at the `(i, j)` pixel and zero everywhere else.
+
+        Args:
+            dim: The dimension of the image.
+            i: The row index of the nonzero pixel.
+            j: The col index of the nonzero pixel.
+
+        Returns:
+            The resulting image.
+        """
+        kernel = self.gaussian_kernel[0, 0, :, :]
+        kernel = kernel.view(1, 1, *kernel.size())
+
+        img = torch.zeros(dim, dim)
+        img[i, j] = 1.0
+        return torchfunc.conv2d(
+            img.view(1, 1, *img.size()),
+            weight=kernel,
+            groups=1,
+            padding=self.padding,
+        )
+
+    def conv_with_bases(self, dim: int, indices: Sequence[Tuple[int, int]]):
+        """Compute the convolution with a sequence of 'basis' images.
+
+        The result of this operation is a sequence of images containing the
+        kernel centered at given pixels and zero everywhere else. The pixels
+        where the kernel starts correspond to the elements of `indices`.
+
+        Args:
+            dim: The dimension of each image.
+            indices: A sequence of starting pixel indices.
+
+        Returns:
+            The resulting images.
+        """
+        kernel = self.gaussian_kernel[0, 0, :, :]
+        kernel = kernel.view(1, 1, *kernel.size())
+
+        imgs = torch.zeros(len(indices), 1, dim, dim)
+        for ii, (i, j) in enumerate(indices):
+            imgs[ii, 0, i, j] = 1.0
+        return torchfunc.conv2d(
+            imgs,
+            weight=kernel,
+            groups=1,
+            padding=self.padding,
         )
 
 

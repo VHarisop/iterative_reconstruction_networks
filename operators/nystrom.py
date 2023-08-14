@@ -4,9 +4,40 @@ from typing import Set, Tuple
 import numpy as np
 from numpy.random import choice
 import torch
+from torch.nn import Linear
 
 from .operator import LinearOperator, SelfAdjointLinearOperator
+from .blurs import GaussianBlur
 
+
+class NystromFactoredBlur(LinearOperator):
+    lin_op: GaussianBlur
+    dim: int
+    rank: int
+
+    def __init__(self, lin_op: GaussianBlur, dim: int, rank: int):
+        super().__init__()
+        self.lin_op = lin_op
+        self.dim = dim
+        self.rank = rank
+
+    def create_approximation(self):
+        flat_idx_pivots = np.random.randint((0, self.dim ** 2), self.rank)
+        self.pivots = list(zip(
+            flat_idx_pivots // self.dim,
+            flat_idx_pivots % self.dim,
+        ))
+        # sub_imgs = (X P_S).T
+        sub_imgs = self.lin_op.conv_with_bases(self.dim, self.pivots)
+        assert sub_imgs.shape == [self.rank, 1, self.dim, self.dim]
+        sub_imgs = sub_imgs.view(self.rank, self.dim ** 2)
+        # Gram matrix (X'X)_{S, S} and its inverse square root
+        evals, evecs = torch.linalg.eigh(sub_imgs @ sub_imgs.T)
+        sub_gram_inv = evecs @ ((evals ** (-1/2)) * evecs.T).T
+        # sub_imgs.T @ sub_gram_inv has shape `d^2 * self.rank`
+        # TODO: Compute the result X.T @ (sub_imgs.T @ sub_gram_inv)
+        # Recall: X.T = X, so self.rank-many convolutions are needed.
+        pass
 
 class NystromFactoredOperator(SelfAdjointLinearOperator):
     factor: torch.Tensor

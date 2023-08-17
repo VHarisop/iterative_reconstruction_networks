@@ -10,14 +10,14 @@ from .operator import LinearOperator, SelfAdjointLinearOperator
 from .blurs import GaussianBlur
 
 
-class NystromFactoredBlur(LinearOperator):
+class NystromFactoredBlur(SelfAdjointLinearOperator):
     lin_op: GaussianBlur
+    dim: int
+    rank: int
     nystrom_factor: torch.Tensor
     nys_U: torch.Tensor
     nys_S: torch.Tensor
     nys_Vh: torch.Tensor
-    dim: int
-    rank: int
 
     def __init__(self, lin_op: GaussianBlur, dim: int, rank: int):
         super().__init__()
@@ -66,9 +66,40 @@ class NystromFactoredBlur(LinearOperator):
         return nystrom_prod
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        orig_size = x.size()
         # Reshape x so that the last dimension is the flattened image.
         x = x.view(*x.size()[:-2], self.dim**2)
-        return (x @ self.nys_U) * (self.nys_S**2) @ self.nys_U.T
+        return (((x @ self.nys_U) * self.nys_S**2) @ self.nys_U.T).view(*orig_size)
+
+
+class NystromFactoredInverseBlur(SelfAdjointLinearOperator):
+    """The inverse of a Nystrom-factored Gaussian blur."""
+
+    nystrom_factored_blur: NystromFactoredBlur
+    reg_lambda: float | torch.Tensor
+    scale_vec: torch.Tensor
+    nys_U: torch.Tensor
+
+    def __init__(
+        self,
+        nystrom_factored_blur: NystromFactoredBlur,
+        reg_lambda: float | torch.Tensor,
+    ):
+        super().__init__()
+        self.nystrom_factored_blur = nystrom_factored_blur
+        self.reg_lambda = reg_lambda
+        self.scale_vec = nystrom_factored_blur.nys_S**2 / (
+            reg_lambda + nystrom_factored_blur.nys_S**2
+        )
+        self.nys_U = nystrom_factored_blur.nys_U
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        orig_size = x.size()
+        # Reshape x so that the last dimension is the flattened image.
+        x = x.view(*x.size()[:-2], self.nystrom_factored_blur.dim**2)
+        return (1 / self.reg_lambda) * (
+            x - ((x @ self.nys_U) * self.scale_vec) @ self.nys_U.T
+        ).view(*orig_size)
 
 
 class NystromFactoredOperator(SelfAdjointLinearOperator):

@@ -4,7 +4,7 @@ from typing import Set, Tuple
 import numpy as np
 from numpy.random import choice
 import torch
-from torch.nn import Linear
+import torch.nn.functional as torchfunc
 
 from .operator import LinearOperator, SelfAdjointLinearOperator
 from .blurs import GaussianBlur
@@ -12,6 +12,10 @@ from .blurs import GaussianBlur
 
 class NystromFactoredBlur(LinearOperator):
     lin_op: GaussianBlur
+    nystrom_factor: torch.Tensor
+    nys_U: torch.Tensor
+    nys_S: torch.Tensor
+    nys_Vh: torch.Tensor
     dim: int
     rank: int
 
@@ -20,24 +24,52 @@ class NystromFactoredBlur(LinearOperator):
         self.lin_op = lin_op
         self.dim = dim
         self.rank = rank
+        self.nystrom_factor = self._create_approximation()
+        self.nys_U, self.nys_S, self.nys_Vh = torch.linalg.svd(
+            self.nystrom_factor.view(self.rank, self.dim**2).T,
+            full_matrices=False,
+        )
 
-    def create_approximation(self):
-        flat_idx_pivots = np.random.randint((0, self.dim ** 2), self.rank)
-        self.pivots = list(zip(
-            flat_idx_pivots // self.dim,
-            flat_idx_pivots % self.dim,
-        ))
+    def _create_approximation(self) -> torch.Tensor:
+        """Create the Nystrom approximation from a random subset of columns.
+
+        Returns:
+            A tensor of shape `(self.rank, 1, self.dim, self.dim)` containing
+            the left Nystrom factor. This method assumes that the kernel is the
+            same for all channels if there are more than one.
+        """
+        flat_idx_pivots = np.random.randint(0, self.dim**2, self.rank)
+        self.pivots = list(
+            zip(
+                flat_idx_pivots // self.dim,
+                flat_idx_pivots % self.dim,
+            )
+        )
         # sub_imgs = (X P_S).T
         sub_imgs = self.lin_op.conv_with_bases(self.dim, self.pivots)
-        assert sub_imgs.shape == [self.rank, 1, self.dim, self.dim]
-        sub_imgs = sub_imgs.view(self.rank, self.dim ** 2)
+        sub_imgs = sub_imgs.view(self.rank, self.dim**2)
         # Gram matrix (X'X)_{S, S} and its inverse square root
         evals, evecs = torch.linalg.eigh(sub_imgs @ sub_imgs.T)
-        sub_gram_inv = evecs @ ((evals ** (-1/2)) * evecs.T).T
+        sub_gram_inv = evecs @ ((evals ** (-1 / 2)) * evecs.T).T
         # sub_imgs.T @ sub_gram_inv has shape `d^2 * self.rank`
-        # TODO: Compute the result X.T @ (sub_imgs.T @ sub_gram_inv)
+        # We now compute the result X.T @ (sub_imgs.T @ sub_gram_inv)
         # Recall: X.T = X, so self.rank-many convolutions are needed.
-        pass
+        gram_inv_prod = (sub_gram_inv @ sub_imgs).view(self.rank, 1, self.dim, self.dim)
+        kernel = self.lin_op.gaussian_kernel[0, 0, :, :]
+        kernel = kernel.view(1, 1, *kernel.size())
+        nystrom_prod = torchfunc.conv2d(
+            gram_inv_prod,
+            kernel,
+            groups=1,
+            padding=self.lin_op.padding,
+        )
+        return nystrom_prod
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # Reshape x so that the last dimension is the flattened image.
+        x = x.view(*x.size()[:-2], self.dim**2)
+        return (x @ self.nys_U) * (self.nys_S**2) @ self.nys_U.T
+
 
 class NystromFactoredOperator(SelfAdjointLinearOperator):
     factor: torch.Tensor

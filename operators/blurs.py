@@ -90,7 +90,7 @@ class GaussianBlur(LinearOperator):
             indices: A sequence of starting pixel indices.
 
         Returns:
-            The resulting images.
+            The resulting images in a tensor of shape `(len(indices), 1, dim, dim)`.
         """
         kernel = self.gaussian_kernel[0, 0, :, :]
         kernel = kernel.view(1, 1, *kernel.size())

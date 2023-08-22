@@ -1,7 +1,13 @@
 import torch
 import torch.nn as nn
+from torch.nn.modules import linear
+from operators.blurs import GaussianBlur
 
-from operators.nystrom import nystrom_approx_factored
+from operators.nystrom import (
+    NystromApproxBlur,
+    NystromApproxBlurInverse,
+    nystrom_approx_factored,
+)
 from operators.nystrom import NystromFactoredInverseOperator
 from operators.operator import LinearOperator
 from solvers.cg_utils import conjugate_gradient
@@ -120,6 +126,15 @@ class PrecondNeumannNet(nn.Module):
 class SketchedNeumannNet(nn.Module):
     "A preconditioned Neumann network using a sketched version of X'X + λI."
 
+    dim: int
+    rank: int
+    linear_op: LinearOperator
+    nonlinear_op: nn.Module
+    iterations: int
+    eta: torch.Tensor
+    sketch_op: NystromApproxBlur
+    sketch_inverse_op: NystromApproxBlurInverse
+
     def __init__(
         self,
         dim: int,
@@ -136,13 +151,6 @@ class SketchedNeumannNet(nn.Module):
         self.nonlinear_op = nonlinear_operator
         self.iterations = iterations
 
-        # Sketched gramian of the linear operator.
-        self.sketch_op, _ = nystrom_approx_factored(
-            self.linear_op,
-            self.dim,
-            self.rank,
-        )
-
         # Check if the linear operator has parameters that can be learned:
         # if so, register them to be learned as part of the network.
         linear_param_name = "linear_param_"
@@ -151,15 +159,31 @@ class SketchedNeumannNet(nn.Module):
             self.register_parameter(name=parameter_name, param=parameter)
 
         self.eta = nn.Parameter(torch.tensor(lambda_initial_val), requires_grad=True)
-        self.inverse_op = NystromFactoredInverseOperator(self.sketch_op, self.eta)
+
+        if type(linear_operator) is not GaussianBlur:
+            raise NotImplementedError("Only available for `GaussianBlur` operators.")
+        else:
+            # Sketched gramian of the linear operator.
+            self.sketch_op = NystromApproxBlur(
+                linear_operator,
+                self.dim,
+                self.rank,
+                pivots=None,
+            )
+            self.sketch_inverse_op = NystromApproxBlurInverse(
+                self.sketch_op,
+                self.eta,
+            )
 
     def single_block(self, input_tensor: torch.Tensor) -> torch.Tensor:
-        return self.eta * self.inverse_op(input_tensor) - self.nonlinear_op(
+        return self.eta * self.sketch_inverse_op(input_tensor) - self.nonlinear_op(
             input_tensor
         )
 
     def forward(self, input_tensor: torch.Tensor) -> torch.Tensor:
-        initial_point = self.eta * self.inverse_op(self.linear_op.adjoint(input_tensor))
+        initial_point = self.eta * self.sketch_inverse_op(
+            self.linear_op.adjoint(input_tensor)
+        )
         running_term = initial_point
         accumulator = initial_point
         for _ in range(self.iterations):

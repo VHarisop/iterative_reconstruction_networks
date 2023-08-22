@@ -1,35 +1,62 @@
 import logging
-from typing import Set, Tuple
+from typing import List, Set, Tuple
 
 import numpy as np
 from numpy.random import choice
 import torch
 import torch.nn.functional as torchfunc
 
-from .operator import LinearOperator, SelfAdjointLinearOperator
 from .blurs import GaussianBlur
+from .operator import LinearOperator, SelfAdjointLinearOperator
 
 
-class NystromFactoredBlur(SelfAdjointLinearOperator):
+class NystromApproxBlur(SelfAdjointLinearOperator):
+    """A Nystrom approximation to `X.T @ X`, where `X` is a Gaussian blur.
+
+    Attributes:
+        lin_op: The linear operator representing the Gaussian blur.
+        dim: The pixel dimension.
+        rank: The rank of the Nystrom approximation.
+        nystrom_factor: The right factor of the factored Nystrom approximation.
+        pivots: A list of column indices used to form the Nystrom approximation.
+    """
+
     lin_op: GaussianBlur
     dim: int
     rank: int
     nystrom_factor: torch.Tensor
-    nys_U: torch.Tensor
-    nys_S: torch.Tensor
-    nys_Vh: torch.Tensor
+    pivots: List[Tuple[int, int]]
 
-    def __init__(self, lin_op: GaussianBlur, dim: int, rank: int):
+    def __init__(
+        self,
+        lin_op: GaussianBlur,
+        dim: int,
+        rank: int | None = None,
+        pivots: List[Tuple[int, int]] | None = None,
+    ):
         super().__init__()
         self.lin_op = lin_op
         self.dim = dim
-        self.rank = rank
-        self.nystrom_factor = self._create_approximation()
-        self.nys_U, self.nys_S, self.nys_Vh = torch.linalg.svd(
-            self.nystrom_factor.view(self.rank, self.dim**2).T,
-            full_matrices=False,
-        )
+        if rank is None:
+            if pivots is None:
+                raise ValueError("`pivots` and `rank` cannot be both `None`.")
+            else:
+                self.pivots = pivots
+                self.rank = len(pivots)
+        else:
+            if pivots is not None:
+                raise ValueError("`pivots` and `rank` cannot be both not `None`.")
+            self.rank = rank
+            flat_idx_pivots = np.random.randint(0, self.dim**2, self.rank)
+            self.pivots = list(
+                zip(
+                    flat_idx_pivots // self.dim,
+                    flat_idx_pivots % self.dim,
+                )
+            )
+        self.nystrom_factor = self._create_approximation().view(self.rank, dim**2)
 
+    @torch.no_grad()
     def _create_approximation(self) -> torch.Tensor:
         """Create the Nystrom approximation from a random subset of columns.
 
@@ -38,27 +65,17 @@ class NystromFactoredBlur(SelfAdjointLinearOperator):
             the left Nystrom factor. This method assumes that the kernel is the
             same for all channels if there are more than one.
         """
-        flat_idx_pivots = np.random.randint(0, self.dim**2, self.rank)
-        self.pivots = list(
-            zip(
-                flat_idx_pivots // self.dim,
-                flat_idx_pivots % self.dim,
-            )
-        )
         # sub_imgs = (X P_S).T
         sub_imgs = self.lin_op.conv_with_bases(self.dim, self.pivots)
         sub_imgs = sub_imgs.view(self.rank, self.dim**2)
-        # Gram matrix (X'X)_{S, S} and its inverse square root
-        evals, evecs = torch.linalg.eigh(sub_imgs @ sub_imgs.T)
-        sub_gram_inv = evecs @ ((evals ** (-1 / 2)) * evecs.T).T
-        # sub_imgs.T @ sub_gram_inv has shape `d^2 * self.rank`
-        # We now compute the result X.T @ (sub_imgs.T @ sub_gram_inv)
+        # Compute the left-singular vectors from the SVD of (XP_S).
+        sub_U, _, _ = torch.linalg.svd(sub_imgs.T, full_matrices=False)
+        # We now compute the result: X.T @ U
         # Recall: X.T = X, so self.rank-many convolutions are needed.
-        gram_inv_prod = (sub_gram_inv @ sub_imgs).view(self.rank, 1, self.dim, self.dim)
         kernel = self.lin_op.gaussian_kernel[0, 0, :, :]
         kernel = kernel.view(1, 1, *kernel.size())
         nystrom_prod = torchfunc.conv2d(
-            gram_inv_prod,
+            (sub_U.T).view(self.rank, 1, self.dim, self.dim),
             kernel,
             groups=1,
             padding=self.lin_op.padding,
@@ -68,37 +85,47 @@ class NystromFactoredBlur(SelfAdjointLinearOperator):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         orig_size = x.size()
         # Reshape x so that the last dimension is the flattened image.
-        x = x.view(*x.size()[:-2], self.dim**2)
-        return (((x @ self.nys_U) * self.nys_S**2) @ self.nys_U.T).view(*orig_size)
+        return (
+            (x.view(*x.size()[:-2], self.dim**2) @ self.nystrom_factor.T)
+            @ self.nystrom_factor
+        ).view(orig_size)
 
 
-class NystromFactoredInverseBlur(SelfAdjointLinearOperator):
-    """The inverse of a Nystrom-factored Gaussian blur."""
+class NystromApproxBlurInverse(SelfAdjointLinearOperator):
+    """The inverse of a regularized Nystrom approximation.
 
-    nystrom_factored_blur: NystromFactoredBlur
+    Attributes:
+        nystrom_approx_blur: The Nystrom approximation.
+        reg_lambda: The regularization constant.
+    """
+
+    nystrom_approx_blur: NystromApproxBlur
     reg_lambda: float | torch.Tensor
-    scale_vec: torch.Tensor
-    nys_U: torch.Tensor
 
     def __init__(
         self,
-        nystrom_factored_blur: NystromFactoredBlur,
+        nystrom_approx_blur: NystromApproxBlur,
         reg_lambda: float | torch.Tensor,
     ):
         super().__init__()
-        self.nystrom_factored_blur = nystrom_factored_blur
+        self.nystrom_approx_blur = nystrom_approx_blur
         self.reg_lambda = reg_lambda
-        self.scale_vec = nystrom_factored_blur.nys_S**2 / (
-            reg_lambda + nystrom_factored_blur.nys_S**2
-        )
-        self.nys_U = nystrom_factored_blur.nys_U
+        self._nys_U, self._scale_vec = self._cache_inverse()
+
+    @torch.no_grad()
+    def _cache_inverse(self) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Cache the inverse operator."""
+        nys_factor = self.nystrom_approx_blur.nystrom_factor
+        nys_U, nys_S, _ = torch.linalg.svd(nys_factor.T, full_matrices=False)
+        scale_vec = nys_S**2 / (self.reg_lambda + nys_S**2)
+        return nys_U, scale_vec
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         orig_size = x.size()
         # Reshape x so that the last dimension is the flattened image.
-        x = x.view(*x.size()[:-2], self.nystrom_factored_blur.dim**2)
+        x = x.view(*x.size()[:-2], self.nystrom_approx_blur.dim**2)
         return (1 / self.reg_lambda) * (
-            x - ((x @ self.nys_U) * self.scale_vec) @ self.nys_U.T
+            x - ((x @ self._nys_U) * self._scale_vec) @ self._nys_U.T
         ).view(*orig_size)
 
 

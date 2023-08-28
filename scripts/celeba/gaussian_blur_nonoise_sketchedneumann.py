@@ -13,7 +13,7 @@ from torchvision.datasets import CelebA
 
 import operators.blurs as blurs
 from networks.u_net import UnetModel
-from solvers.neumann import NeumannNet
+from solvers.neumann import SketchedNeumannNet
 from utils.train_utils import hash_dict
 
 
@@ -30,6 +30,9 @@ def setup_args() -> argparse.Namespace:
         help="The number of unrolled iterations",
         type=int,
         default=6,
+    )
+    parser.add_argument(
+        "--rank", help="The rank of the Nystrom approximation", type=int, default=10
     )
     parser.add_argument(
         "--kernel_size", help="The size of the blur kernel", type=int, default=5
@@ -126,10 +129,13 @@ learned_component = UnetModel(
     drop_prob=0.0,
     chans=32,
 )
-solver = NeumannNet(
+solver = SketchedNeumannNet(
+    dim=128,
+    rank=args.rank,
     linear_operator=internal_forward_operator,
     nonlinear_operator=learned_component,
-    eta_initial_val=args.algorithm_step_size,
+    lambda_initial_val=args.algorithm_step_size,
+    iterations=args.num_solver_iterations,
 )
 
 solver = solver.to(device=_DEVICE_)
@@ -166,7 +172,7 @@ for epoch in range(args.num_epochs):
         sample_batch = sample_batch.to(device=_DEVICE_)
         y = forward_operator(sample_batch)
         # Reconstruct image using `num_solver_iterations` unrolled iterations.
-        reconstruction = solver(y, iterations=args.num_solver_iterations)
+        reconstruction = solver(y)
         reconstruction = torch.clamp(reconstruction, -1, 1)
 
         # Evaluate loss function and take gradient step.

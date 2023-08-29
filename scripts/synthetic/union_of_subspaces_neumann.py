@@ -44,7 +44,9 @@ parser.add_argument(
     type=float,
     default=0.1,
 )
-parser.add_argument("--start_epoch", help="The starting epoch for training", type=int, default=0)
+parser.add_argument(
+    "--start_epoch", help="The starting epoch for training", type=int, default=0
+)
 # Checkpointing options
 parser.add_argument("--log_frequency", type=int, default=10)
 parser.add_argument("--save_frequency", type=int, default=5)
@@ -85,9 +87,14 @@ def generate_vectors(
     assert betas.shape == torch.Size([num_samples, dim])
     return betas
 
+
 # Set up data and dataloaders
-train_dataset = TensorDataset(generate_vectors(args.dim, args.rank, args.num_subspaces, args.num_train_samples))
-test_dataset = TensorDataset(generate_vectors(args.dim, args.rank, args.num_subspaces, args.num_test_samples))
+train_dataset = TensorDataset(
+    generate_vectors(args.dim, args.rank, args.num_subspaces, args.num_train_samples)
+)
+test_dataset = TensorDataset(
+    generate_vectors(args.dim, args.rank, args.num_subspaces, args.num_test_samples)
+)
 
 train_loader = DataLoader(
     train_dataset,
@@ -106,8 +113,10 @@ test_loader = DataLoader(
 # Here, the forward operator is just a coordinate selection operator.
 # Its adjoint is given by appending the complementary number of zeros.
 forward_operator = LinearOperator()
-forward_operator.forward = lambda x: x[:args.keep_coords]
-forward_operator.adjoint = lambda y: torch.cat((y, torch.zeros(args.dim - args.keep_coords, device=_DEVICE_, dtype=torch.float)))
+forward_operator.forward = lambda x: x[: args.keep_coords]
+forward_operator.adjoint = lambda y: torch.cat(
+    (y, torch.zeros(args.dim - args.keep_coords, device=_DEVICE_, dtype=torch.float))
+)
 forward_operator = forward_operator.to(_DEVICE_)
 
 # Standard U-net
@@ -127,7 +136,9 @@ solver = solver.to(device=_DEVICE_)
 
 start_epoch = 0
 optimizer = optim.Adam(params=solver.parameters(), lr=args.learning_rate)
-scheduler = optim.lr_scheduler.StepLR(optimizer=optimizer, step_size=(args.learning_rate // 2), gamma=0.1)
+scheduler = optim.lr_scheduler.StepLR(
+    optimizer=optimizer, step_size=(args.learning_rate // 2), gamma=0.1
+)
 cpu_only = not torch.cuda.is_available()
 
 

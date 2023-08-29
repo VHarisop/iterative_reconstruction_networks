@@ -122,6 +122,7 @@ test_loader = DataLoader(
 
 class ForwardOperator(LinearOperator):
     """An operator that selects the first `keep_coords` of a vector."""
+
     dim: int
     keep_coords: int
 
@@ -154,9 +155,9 @@ class ForwardOperator(LinearOperator):
             return torch.cat(
                 (
                     x,
-                    torch.zeros(self.dim - self.keep_coords,
-                                device=_DEVICE_,
-                                dtype=torch.float),
+                    torch.zeros(
+                        self.dim - self.keep_coords, device=_DEVICE_, dtype=torch.float
+                    ),
                 ),
                 dim=0,
             )

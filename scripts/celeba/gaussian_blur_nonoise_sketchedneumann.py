@@ -13,6 +13,7 @@ from torchvision.datasets import CelebA
 
 import operators.blurs as blurs
 from networks.u_net import UnetModel
+from operators.nystrom import NystromApproxBlur, NystromApproxBlurGaussian
 from solvers.neumann import SketchedNeumannNet
 from utils.train_utils import hash_dict
 
@@ -33,6 +34,12 @@ def setup_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--rank", help="The rank of the Nystrom approximation", type=int, default=10
+    )
+    parser.add_argument(
+        "--sketch_type",
+        help="The sketch type",
+        type=str,
+        choices=["gaussian", "column"],
     )
     parser.add_argument(
         "--kernel_size", help="The size of the blur kernel", type=int, default=5
@@ -63,6 +70,7 @@ args = setup_args()
 if args.use_cuda:
     if torch.cuda.is_available():
         _DEVICE_ = torch.device("cuda:0")
+        logging.info("Using CUDA")
     else:
         raise ValueError("CUDA is not available!")
 else:
@@ -117,9 +125,19 @@ forward_operator = blurs.GaussianBlur(
 ).to(device=_DEVICE_)
 measurement_process = forward_operator
 
-internal_forward_operator = blurs.GaussianBlur(
-    sigma=5.0, kernel_size=args.kernel_size, n_channels=3, n_spatial_dimensions=2
-).to(device=_DEVICE_)
+if args.sketch_type == "gaussian":
+    sketched_forward_operator = NystromApproxBlurGaussian(
+        forward_operator,
+        dim=128,
+        rank=args.rank,
+    ).to(device=_DEVICE_)
+else:
+    sketched_forward_operator = NystromApproxBlur(
+        forward_operator,
+        dim=128,
+        rank=args.rank,
+        pivots=None,
+    ).to(device=_DEVICE_)
 
 # standard u-net
 learned_component = UnetModel(
@@ -130,9 +148,8 @@ learned_component = UnetModel(
     chans=32,
 )
 solver = SketchedNeumannNet(
-    dim=128,
-    rank=args.rank,
-    linear_operator=internal_forward_operator,
+    linear_operator=forward_operator,
+    sketched_operator=sketched_forward_operator,
     nonlinear_operator=learned_component,
     lambda_initial_val=args.algorithm_step_size,
     iterations=args.num_solver_iterations,

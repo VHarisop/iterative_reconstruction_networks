@@ -1,14 +1,9 @@
 import torch
 import torch.nn as nn
-from torch.nn.modules import linear
 from operators.blurs import GaussianBlur
 
-from operators.nystrom import (
-    NystromApproxBlur,
-    NystromApproxBlurInverse,
-    nystrom_approx_factored,
-)
-from operators.nystrom import NystromFactoredInverseOperator
+from operators.nystrom import NystromApproxBlur
+from operators.nystrom import NystromApproxBlurInverse
 from operators.operator import LinearOperator
 from solvers.cg_utils import conjugate_gradient
 
@@ -57,6 +52,21 @@ class NeumannNet(nn.Module):
 
 
 class PrecondNeumannNet(nn.Module):
+    """A preconditioned Neumann network.
+
+    Attributes:
+        linear_op: The linear operator.
+        nonlinear_op: The nonlinear operator, which is often a learned component.
+        cg_iterations: The number of CG iterations to unroll when computing
+            inverses.
+        eta: The amount of preconditioning added.
+    """
+
+    linear_op: LinearOperator
+    nonlinear_op: nn.Module
+    cg_iterations: int
+    eta: nn.Module | torch.Tensor
+
     def __init__(
         self,
         linear_operator,
@@ -124,7 +134,19 @@ class PrecondNeumannNet(nn.Module):
 
 
 class SketchedNeumannNet(nn.Module):
-    "A preconditioned Neumann network using a sketched version of X'X + λI."
+    """A preconditioned Neumann network using a sketched version of X'X + λI.
+
+    Attributes:
+        dim: The feature dimension. When inputs are square images, this
+            is the number of rows / columns of the image.
+        rank: The rank of the Nystrom approximation.
+        linear_op: The linear operator.
+        nonlinear_op: The nonlinear operator, which is often a learned component.
+        iterations: The number of iterations to unroll.
+        eta: The coefficient in front of the added identity for preconditioning.
+        sketch_op: The Nystrom sketch of `linear_op`.
+        sketch_inverse_op: The inverse of the Nystrom sketch of `linear_op`.
+    """
 
     dim: int
     rank: int
@@ -158,7 +180,10 @@ class SketchedNeumannNet(nn.Module):
             parameter_name = linear_param_name + str(ii)
             self.register_parameter(name=parameter_name, param=parameter)
 
-        self.eta = nn.Parameter(torch.tensor(lambda_initial_val), requires_grad=True)
+        self.register_parameter(
+            name="eta",
+            param=nn.Parameter(torch.tensor(lambda_initial_val), requires_grad=True),
+        )
 
         if type(linear_operator) is not GaussianBlur:
             raise NotImplementedError("Only available for `GaussianBlur` operators.")

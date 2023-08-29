@@ -42,9 +42,6 @@ def setup_args() -> argparse.Namespace:
         type=float,
         default=0.1,
     )
-    parser.add_argument(
-        "--start_epoch", help="The starting epoch for training", type=int, default=0
-    )
     # Checkpointing options
     parser.add_argument("--log_file_location", type=str, default="")
     parser.add_argument("--save_frequency", type=int, default=5)
@@ -134,7 +131,6 @@ solver = NeumannNet(
 
 solver = solver.to(device=_DEVICE_)
 
-start_epoch = 0
 optimizer = optim.Adam(params=solver.parameters(), lr=args.learning_rate)
 scheduler = optim.lr_scheduler.StepLR(
     optimizer=optimizer, step_size=(args.num_epochs // 2), gamma=0.1

@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 from operators.blurs import GaussianBlur
 
-from operators.nystrom import NystromApproxBlur
+from operators.nystrom import NystromApproxBlur, NystromApproxBlurGaussian
 from operators.nystrom import NystromApproxBlurInverse
 from operators.operator import LinearOperator
 from solvers.cg_utils import conjugate_gradient
@@ -154,22 +154,20 @@ class SketchedNeumannNet(nn.Module):
     nonlinear_op: nn.Module
     iterations: int
     eta: torch.Tensor
-    sketch_op: NystromApproxBlur
+    sketch_op: NystromApproxBlur | NystromApproxBlurGaussian
     sketch_inverse_op: NystromApproxBlurInverse
 
     def __init__(
         self,
-        dim: int,
-        rank: int,
         linear_operator: LinearOperator,
+        sketched_operator: NystromApproxBlur | NystromApproxBlurGaussian,
         nonlinear_operator: nn.Module,
         lambda_initial_val: float = 0.1,
         iterations: int = 6,
     ):
         super(SketchedNeumannNet, self).__init__()
-        self.dim = dim
-        self.rank = rank
         self.linear_op = linear_operator
+        self.sketch_op = sketched_operator
         self.nonlinear_op = nonlinear_operator
         self.iterations = iterations
 
@@ -188,13 +186,6 @@ class SketchedNeumannNet(nn.Module):
         if type(linear_operator) is not GaussianBlur:
             raise NotImplementedError("Only available for `GaussianBlur` operators.")
         else:
-            # Sketched gramian of the linear operator.
-            self.sketch_op = NystromApproxBlur(
-                linear_operator,
-                self.dim,
-                self.rank,
-                pivots=None,
-            )
             self.sketch_inverse_op = NystromApproxBlurInverse(
                 self.sketch_op,
                 self.eta,

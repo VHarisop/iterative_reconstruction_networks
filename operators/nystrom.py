@@ -1,5 +1,6 @@
 import logging
 from typing import List, Set, Tuple
+from cv2.dnn import NMSBoxes
 
 import numpy as np
 from numpy.random import choice
@@ -8,6 +9,59 @@ import torch.nn.functional as torchfunc
 
 from .blurs import GaussianBlur
 from .operator import LinearOperator, SelfAdjointLinearOperator
+
+
+class NystromApproxBlurGaussian(SelfAdjointLinearOperator):
+    """A Nystrom approximation to `X'X` where `X` is a Gaussian blur.
+
+    This Nystrom approximation uses a matrix with standard Gaussian entries
+    as the test matrix."""
+
+    def __init__(self, lin_op: GaussianBlur, dim: int, rank: int):
+        super().__init__()
+        self.lin_op = lin_op
+        self.dim = dim
+        self.rank = rank
+        self.nystrom_factor = self._create_approximation().view(
+            self.rank,
+            self.dim**2,
+        )
+
+    def _create_approximation(self):
+        kernel = self.lin_op.gaussian_kernel[0, 0, :, :]
+        kernel = kernel.view(1, 1, *kernel.size())
+        test_mat = torch.randn(self.rank, 1, self.dim, self.dim, device=kernel.device)
+        # sub_imgs = (X P_S).T
+        sub_imgs = torchfunc.conv2d(
+            test_mat,
+            weight=kernel,
+            groups=1,
+            padding=self.lin_op.padding,
+        )
+        assert sub_imgs.size() == torch.Size([self.rank, 1, self.dim, self.dim])
+        # Compute the left-singular vectors from the SVD of (XP_S).
+        sub_U, _, _ = torch.linalg.svd(
+            sub_imgs.view(self.rank, self.dim**2).T,
+            full_matrices=False,
+        )
+        # We now compute the result: X.T @ U
+        # Recall: X.T = X, so self.rank-many convolutions are needed.
+        nystrom_prod = torchfunc.conv2d(
+            (sub_U.T).view(self.rank, 1, self.dim, self.dim),
+            weight=kernel,
+            groups=1,
+            padding=self.lin_op.padding,
+        )
+        assert nystrom_prod.size() == torch.Size([self.rank, 1, self.dim, self.dim])
+        return nystrom_prod
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        orig_size = x.size()
+        # Reshape x so that the last dimension is the flattened image.
+        return (
+            (x.view(*x.size()[:-2], self.dim**2) @ self.nystrom_factor.T)
+            @ self.nystrom_factor
+        ).view(orig_size)
 
 
 class NystromApproxBlur(SelfAdjointLinearOperator):
@@ -99,13 +153,13 @@ class NystromApproxBlurInverse(SelfAdjointLinearOperator):
         reg_lambda: The regularization constant.
     """
 
-    nystrom_approx_blur: NystromApproxBlur
+    nystrom_approx_blur: NystromApproxBlur | NystromApproxBlurGaussian
     reg_lambda: float | torch.Tensor
 
     def __init__(
         self,
-        nystrom_approx_blur: NystromApproxBlur,
-        reg_lambda: float | torch.Tensor,
+        nystrom_approx_blur: NystromApproxBlur | NystromApproxBlurGaussian,
+        reg_lambda: float | torch.Tensor | torch.nn.Parameter,
     ):
         super().__init__()
         self.nystrom_approx_blur = nystrom_approx_blur

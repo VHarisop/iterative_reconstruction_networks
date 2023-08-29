@@ -5,9 +5,8 @@ import time
 
 import numpy as np
 import torch
-import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, RandomSampler
 from torchvision import transforms
 from torchvision.datasets import CelebA
 
@@ -23,6 +22,12 @@ def setup_args() -> argparse.Namespace:
         description="Run a Neumann network experiment for blurry image reconstruction."
     )
     parser.add_argument("--data_folder", help="Root folder for the dataset", type=str)
+    parser.add_argument(
+        "--num_train_samples",
+        help="Number of samples to use in training",
+        type=int,
+        default=30000,
+    )
     parser.add_argument(
         "--num_epochs", help="The number of training epochs", type=int, default=80
     )
@@ -40,6 +45,7 @@ def setup_args() -> argparse.Namespace:
         help="The sketch type",
         type=str,
         choices=["gaussian", "column"],
+        required=True,
     )
     parser.add_argument(
         "--kernel_size", help="The size of the blur kernel", type=int, default=5
@@ -52,9 +58,7 @@ def setup_args() -> argparse.Namespace:
         type=float,
         default=0.1,
     )
-    parser.add_argument(
-        "--start_epoch", help="The starting epoch for training", type=int, default=0
-    )
+
     # Checkpointing options
     parser.add_argument("--log_file_location", type=str, default="")
     parser.add_argument("--save_frequency", type=int, default=5)
@@ -81,6 +85,7 @@ logging.basicConfig(
     level=(logging.DEBUG if args.verbose else logging.INFO),
     filename=args.log_file_location,
 )
+logging.debug(f"Device = {_DEVICE_}")
 
 # Set up data and dataloaders
 transform = transforms.Compose(
@@ -98,6 +103,10 @@ train_data = CelebA(
     transform=transform,
     download=True,
 )
+train_sampler = RandomSampler(
+    train_data, replacement=False, num_samples=args.num_train_samples
+)
+logging.info(f"Using {args.num_train_samples} samples")
 test_data = CelebA(
     root=args.data_folder,
     split="test",
@@ -108,12 +117,15 @@ test_data = CelebA(
 train_loader = DataLoader(
     dataset=train_data,
     batch_size=args.batch_size,
+    sampler=train_sampler,
+    pin_memory=True,
     shuffle=True,
     drop_last=True,
 )
 test_loader = DataLoader(
     dataset=test_data,
     batch_size=args.batch_size,
+    pin_memory=True,
     shuffle=False,
     drop_last=False,
 )
@@ -130,14 +142,14 @@ if args.sketch_type == "gaussian":
         forward_operator,
         dim=128,
         rank=args.rank,
-    ).to(device=_DEVICE_)
+    )
 else:
     sketched_forward_operator = NystromApproxBlur(
         forward_operator,
         dim=128,
         rank=args.rank,
         pivots=None,
-    ).to(device=_DEVICE_)
+    )
 
 # standard u-net
 learned_component = UnetModel(
@@ -157,7 +169,6 @@ solver = SketchedNeumannNet(
 
 solver = solver.to(device=_DEVICE_)
 
-start_epoch = 0
 optimizer = optim.Adam(params=solver.parameters(), lr=args.learning_rate)
 scheduler = optim.lr_scheduler.StepLR(
     optimizer=optimizer, step_size=(args.num_epochs // 2), gamma=0.1

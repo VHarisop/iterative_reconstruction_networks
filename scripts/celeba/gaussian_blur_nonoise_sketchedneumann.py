@@ -220,7 +220,7 @@ for epoch in range(args.num_epochs):
         for idx, (sample_batch, _) in enumerate(train_loader):
             sample_batch = sample_batch.to(_DEVICE_)
             y = forward_operator(sample_batch)
-            reconstruction = solver(y, iterations=args.num_solver_iterations)
+            reconstruction = solver(y)
             reconstruction = torch.clamp(reconstruction, -1, 1)
             # Append loss to accumulator
             loss_accumulator.append(lossfunction(reconstruction, sample_batch).item())
@@ -240,7 +240,7 @@ with torch.no_grad():
     for ii, (sample_batch, _) in enumerate(test_loader):
         sample_batch = sample_batch.to(device=_DEVICE_)
         y = measurement_process(sample_batch)
-        reconstruction = solver(y, iterations=args.num_solver_iterations)
+        reconstruction = solver(y)
         reconstruction = torch.clamp(reconstruction, -1, 1)
 
         # Evalute loss function

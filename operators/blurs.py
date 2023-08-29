@@ -1,10 +1,12 @@
-from typing import Sequence, Tuple
-import numpy as np
-import numbers
 import math
+import numbers
+from typing import Sequence, Tuple
+
 import cv2
+import numpy as np
 import torch
 import torch.nn.functional as torchfunc
+
 from operators.operator import LinearOperator
 
 
@@ -69,7 +71,12 @@ class GaussianBlur(LinearOperator):
         kernel = self.gaussian_kernel[0, 0, :, :]
         kernel = kernel.view(1, 1, *kernel.size())
 
-        img = torch.zeros(dim, dim)
+        img = torch.zeros(
+            dim,
+            dim,
+            dtype=kernel.dtype,
+            device=kernel.device,
+        )
         img[i, j] = 1.0
         return torchfunc.conv2d(
             img.view(1, 1, *img.size()),
@@ -95,7 +102,14 @@ class GaussianBlur(LinearOperator):
         kernel = self.gaussian_kernel[0, 0, :, :]
         kernel = kernel.view(1, 1, *kernel.size())
 
-        imgs = torch.zeros(len(indices), 1, dim, dim)
+        imgs = torch.zeros(
+            len(indices),
+            1,
+            dim,
+            dim,
+            device=kernel.device,
+            dtype=kernel.dtype,
+        )
         for ii, (i, j) in enumerate(indices):
             imgs[ii, 0, i, j] = 1.0
         return torchfunc.conv2d(

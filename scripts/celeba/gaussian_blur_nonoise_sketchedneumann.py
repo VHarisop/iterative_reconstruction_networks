@@ -119,7 +119,7 @@ train_loader = DataLoader(
     batch_size=args.batch_size,
     sampler=train_sampler,
     pin_memory=True,
-    shuffle=True,
+    shuffle=False,
     drop_last=True,
 )
 test_loader = DataLoader(

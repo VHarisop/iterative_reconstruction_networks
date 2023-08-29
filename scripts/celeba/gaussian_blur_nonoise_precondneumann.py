@@ -1,59 +1,78 @@
-import torch
+import argparse
+import logging
 import os
-import random
-import sys
+import time
 
-sys.path.append("/home-nfs/gilton/learned_iterative_solvers")
+import numpy as np
+import torch
 import torch.nn as nn
 import torch.optim as optim
+from torch.utils.data import DataLoader
 from torchvision import transforms
+from torchvision.datasets import CelebA
 
 import operators.blurs as blurs
-from operators.operator import OperatorPlusNoise
-from utils.celeba_dataloader import CelebaTrainingDatasetSubset, CelebaTestDataset
 from networks.u_net import UnetModel
 from solvers.neumann import PrecondNeumannNet
-from training import standard_training
+from utils.train_utils import hash_dict
 
-# Parameters to modify
-n_epochs = 80
-current_epoch = 0
-batch_size = 8
-n_channels = 3
-learning_rate = 0.001
-print_every_n_steps = 10
-save_every_n_epochs = 5
-initial_eta = 0.9
 
-initial_data_points = 10000
-# point this towards your celeba files
-data_location = "/share/data/vision-greg2/mixpatch/img_align_celeba/"
+def setup_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Run a Neumann network experiment for blurry image reconstruction."
+    )
+    parser.add_argument("--data_folder", help="Root folder for the dataset", type=str)
+    parser.add_argument(
+        "--num_epochs", help="The number of training epochs", type=int, default=80
+    )
+    parser.add_argument(
+        "--num_solver_iterations",
+        help="The number of unrolled iterations",
+        type=int,
+        default=6,
+    )
+    parser.add_argument(
+        "--kernel_size", help="The size of the blur kernel", type=int, default=5
+    )
+    parser.add_argument("--batch_size", help="The batch size", type=int, default=64)
+    parser.add_argument("--learning_rate", type=float, default=0.001)
+    parser.add_argument(
+        "--lambda_initial_val",
+        help="The initial magnitude of the added preconditioner",
+        type=float,
+        default=0.9,
+    )
+    parser.add_argument(
+        "--cg_iterations",
+        help="The number of CG iterations to apply T_{lambda}",
+        type=int,
+        default=10,
+    )
+    # Checkpointing options
+    parser.add_argument("--log_file_location", type=str, default="")
+    parser.add_argument("--save_frequency", type=int, default=5)
+    parser.add_argument("--save_location", type=str, default=os.getenv("HOME"))
+    parser.add_argument("--verbose", action="store_true")
+    # CUDA
+    parser.add_argument("--use_cuda", action="store_true")
 
-kernel_size = 5
+    return parser.parse_args()
 
-# modify this for your machine
-save_location = (
-    "/share/data/vision-greg2/users/gilton/gaussianblur_nonoise_precondneumann.ckpt"
+
+args = setup_args()
+if args.use_cuda:
+    if torch.cuda.is_available():
+        _DEVICE_ = torch.device("cuda:0")
+    else:
+        raise ValueError("CUDA is not available!")
+else:
+    _DEVICE_ = torch.device("cpu")
+
+# Set up logging
+logging.basicConfig(
+    level=(logging.DEBUG if args.verbose else logging.INFO),
+    filename=args.log_file_location,
 )
-
-gpu_ids = []
-for ii in range(6):
-    try:
-        torch.cuda.get_device_properties(ii)
-        print(str(ii), flush=True)
-        if not gpu_ids:
-            gpu_ids = [ii]
-        else:
-            gpu_ids.append(ii)
-    except AssertionError:
-        print("Not " + str(ii) + "!", flush=True)
-
-print(os.getenv("CUDA_VISIBLE_DEVICES"), flush=True)
-gpu_ids = [int(x) for x in gpu_ids]
-# device management
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-use_dataparallel = len(gpu_ids) > 1
-print("GPU IDs: " + str([int(x) for x in gpu_ids]), flush=True)
 
 # Set up data and dataloaders
 transform = transforms.Compose(
@@ -63,44 +82,49 @@ transform = transforms.Compose(
         transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
     ]
 )
-celeba_train_size = 162770
-total_data = initial_data_points
-total_indices = random.sample(range(celeba_train_size), k=total_data)
-initial_indices = total_indices
 
-dataset = CelebaTrainingDatasetSubset(
-    data_location, subset_indices=initial_indices, transform=transform
+# Create datasets and dataloaders.
+train_data = CelebA(
+    root=args.data_folder,
+    split="train",
+    transform=transform,
+    download=True,
 )
-dataloader = torch.utils.data.DataLoader(
-    dataset=dataset,
-    batch_size=batch_size,
+test_data = CelebA(
+    root=args.data_folder,
+    split="test",
+    transform=transform,
+    download=True,
+)
+
+train_loader = DataLoader(
+    dataset=train_data,
+    batch_size=args.batch_size,
     shuffle=True,
     drop_last=True,
 )
-
-test_dataset = CelebaTestDataset(data_location, transform=transform)
-test_dataloader = torch.utils.data.DataLoader(
-    dataset=test_dataset,
-    batch_size=batch_size,
+test_loader = DataLoader(
+    dataset=test_data,
+    batch_size=args.batch_size,
     shuffle=False,
-    drop_last=True,
+    drop_last=False,
 )
 
 ### Set up solver and problem setting
 
 forward_operator = blurs.GaussianBlur(
-    sigma=5.0, kernel_size=kernel_size, n_channels=3, n_spatial_dimensions=2
-).to(device=device)
+    sigma=5.0, kernel_size=args.kernel_size, n_channels=3, n_spatial_dimensions=2
+).to(device=_DEVICE_)
 measurement_process = forward_operator
 
 internal_forward_operator = blurs.GaussianBlur(
-    sigma=5.0, kernel_size=kernel_size, n_channels=3, n_spatial_dimensions=2
-).to(device=device)
+    sigma=5.0, kernel_size=args.kernel_size, n_channels=3, n_spatial_dimensions=2
+).to(device=_DEVICE_)
 
 # standard u-net
 learned_component = UnetModel(
-    in_chans=n_channels,
-    out_chans=n_channels,
+    in_chans=3,
+    out_chans=3,
     num_pool_layers=4,
     drop_prob=0.0,
     chans=32,
@@ -108,47 +132,94 @@ learned_component = UnetModel(
 solver = PrecondNeumannNet(
     linear_operator=internal_forward_operator,
     nonlinear_operator=learned_component,
-    lambda_initial_val=initial_eta,
-    cg_iterations=4,
+    lambda_initial_val=args.lambda_initial_val,
+    cg_iterations=args.cg_iterations,
 )
 
-if use_dataparallel:
-    solver = nn.DataParallel(solver, device_ids=gpu_ids)
-solver = solver.to(device=device)
+solver = solver.to(device=_DEVICE_)
 
-start_epoch = 0
-optimizer = optim.Adam(params=solver.parameters(), lr=learning_rate)
-scheduler = optim.lr_scheduler.StepLR(optimizer=optimizer, step_size=40, gamma=0.1)
+optimizer = optim.Adam(params=solver.parameters(), lr=args.learning_rate)
+scheduler = optim.lr_scheduler.StepLR(
+    optimizer=optimizer, step_size=(args.num_epochs // 2), gamma=0.1
+)
 cpu_only = not torch.cuda.is_available()
-
-if os.path.exists(save_location):
-    if not cpu_only:
-        saved_dict = torch.load(save_location)
-    else:
-        saved_dict = torch.load(save_location, map_location="cpu")
-
-    start_epoch = saved_dict["epoch"]
-    solver.load_state_dict(saved_dict["solver_state_dict"])
-    optimizer.load_state_dict(saved_dict["optimizer_state_dict"])
-    scheduler.load_state_dict(saved_dict["scheduler_state_dict"])
 
 # set up loss and train
 lossfunction = torch.nn.MSELoss()
 
-# Do train
-standard_training.train_solver(
-    solver=solver,
-    train_dataloader=dataloader,
-    test_dataloader=test_dataloader,
-    measurement_process=measurement_process,
-    optimizer=optimizer,
-    save_location=save_location,
-    loss_function=lossfunction,
-    n_epochs=n_epochs,
-    use_dataparallel=use_dataparallel,
-    device=device,
-    scheduler=scheduler,
-    print_every_n_steps=print_every_n_steps,
-    save_every_n_epochs=save_every_n_epochs,
-    start_epoch=start_epoch,
-)
+# Training
+time_elapsed = 0.0
+for epoch in range(args.num_epochs):
+    if epoch % args.save_frequency:
+        torch.save(
+            {
+                "solver_state_dict": solver.state_dict(),
+                "epoch": epoch,
+                "optimizer_state_dict": optimizer.state_dict(),
+                "scheduler_state_dict": scheduler.state_dict(),
+            },
+            os.path.join(
+                args.save_location,
+                f"{hash_dict(vars(args))}_{epoch}.pt",
+            ),
+        )
+    start_time = time.time()
+    for idx, (sample_batch, _) in enumerate(train_loader):
+        optimizer.zero_grad()
+        sample_batch = sample_batch.to(device=_DEVICE_)
+        y = forward_operator(sample_batch)
+        # Reconstruct image using `num_solver_iterations` unrolled iterations.
+        reconstruction = solver(y, iterations=args.num_solver_iterations)
+        reconstruction = torch.clamp(reconstruction, -1, 1)
+
+        # Evaluate loss function and take gradient step.
+        loss = lossfunction(reconstruction, sample_batch)
+        loss.backward()
+        optimizer.step()
+
+        # Log to stderr and wandb
+        logging.info("Epoch: %d - Step: %d - Loss: %f" % (epoch, idx, loss.item()))
+    # Compute elapsed time
+    elapsed_time = time.time() - start_time
+    logging.info("Epoch: %d - Time elapsed: %.3f" % (epoch, elapsed_time))
+
+    # TODO: Report loss over training set and elapsed time to Wandb
+    with torch.no_grad():
+        loss_accumulator = []
+        for idx, (sample_batch, _) in enumerate(train_loader):
+            sample_batch = sample_batch.to(_DEVICE_)
+            y = forward_operator(sample_batch)
+            reconstruction = solver(y, iterations=args.num_solver_iterations)
+            reconstruction = torch.clamp(reconstruction, -1, 1)
+            # Append loss to accumulator
+            loss_accumulator.append(lossfunction(reconstruction, sample_batch).item())
+        loss_array = np.asarray(loss_accumulator)
+        loss_mse = np.mean(loss_array)
+        train_psnr = -10 * np.log10(loss_mse)
+        percentiles_psnr = -10 * np.log10(np.percentile(loss_array, [25, 50, 75]))
+        logging.info("Train MSE: %f - Train mean PSNR: %f" % (loss_mse, train_psnr))
+        logging.info("Train PSNR quartiles: %.2f, %.2f, %.2f" % tuple(percentiles_psnr))
+
+    if scheduler is not None:
+        scheduler.step()
+
+# Evaluation
+loss_accumulator = []
+with torch.no_grad():
+    for ii, (sample_batch, _) in enumerate(test_loader):
+        sample_batch = sample_batch.to(device=_DEVICE_)
+        y = measurement_process(sample_batch)
+        reconstruction = solver(y, iterations=args.num_solver_iterations)
+        reconstruction = torch.clamp(reconstruction, -1, 1)
+
+        # Evalute loss function
+        loss = lossfunction(reconstruction, sample_batch)
+        loss_accumulator.append(loss.item())
+
+loss_array = np.asarray(loss_accumulator)
+loss_mse = np.mean(loss_array)
+PSNR = -10 * np.log10(loss_mse)
+percentiles = np.percentile(loss_array, [25, 50, 75])
+percentiles = -10.0 * np.log10(percentiles)
+logging.info("Test loss: %f - Test mean PSNR: %f" % (loss_mse, PSNR))
+logging.info("Test PSNR quartiles: %f, %f, %f" % tuple(percentiles))

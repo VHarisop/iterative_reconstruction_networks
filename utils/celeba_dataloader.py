@@ -43,7 +43,7 @@ def create_dataloaders(
         shuffle=True,
         drop_last=True,
         pin_memory=True,
-        num_workers=(os.cpu_count() // 2),
+        num_workers=min(os.cpu_count() // 2, 2),
         persistent_workers=True,
     )
     test_loader = DataLoader(
@@ -52,7 +52,7 @@ def create_dataloaders(
         shuffle=False,
         drop_last=False,
         pin_memory=True,
-        num_workers=(os.cpu_count() // 2),
+        num_workers=min(os.cpu_count() // 2, 2),
         persistent_workers=True,
     )
     return train_loader, test_loader

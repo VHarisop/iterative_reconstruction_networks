@@ -6,6 +6,7 @@ import time
 import numpy as np
 import torch
 import torch.optim as optim
+import wandb
 
 from networks.u_net import UnetModel
 import operators.blurs as blurs
@@ -48,6 +49,18 @@ logging.basicConfig(
     filename=args.log_file_location,
 )
 logging.debug(f"Device = {_DEVICE_}")
+
+# Set up wandb logging
+run = wandb.init(
+    config=vars(args),
+    id=hash_dict(vars(args)),
+    entity=args.wandb_entity,
+    project=args.wandb_project_name,
+    resume=None,
+    mode=args.wandb_mode,
+    settings=wandb.Settings(start_method="fork"),
+)
+assert run is not None
 
 # Set up data and dataloaders
 train_data, test_data = create_datasets(args.data_folder)
@@ -105,6 +118,7 @@ for epoch in range(args.num_epochs):
                 f"{hash_dict(vars(args))}_{epoch}.pt",
             ),
         )
+    total_batches = 0
     start_time = time.time()
     for idx, (sample_batch, _) in enumerate(train_loader):
         optimizer.zero_grad()
@@ -119,13 +133,14 @@ for epoch in range(args.num_epochs):
         loss.backward()
         optimizer.step()
 
-        # Log to stderr and wandb
+        # Log to stderr
         logging.info("Epoch: %d - Step: %d - Loss: %f" % (epoch, idx, loss.item()))
+        total_batches += 1
     # Compute elapsed time
     elapsed_time = time.time() - start_time
     logging.info("Epoch: %d - Time elapsed: %.3f" % (epoch, elapsed_time))
 
-    # TODO: Report loss over training set and elapsed time to Wandb
+    # Report loss over training set and elapsed time to Wandb
     with torch.no_grad():
         loss_accumulator = []
         for idx, (sample_batch, _) in enumerate(train_loader):
@@ -141,6 +156,16 @@ for epoch in range(args.num_epochs):
         percentiles_psnr = -10 * np.log10(np.percentile(loss_array, [25, 50, 75]))
         logging.info("Train MSE: %f - Train mean PSNR: %f" % (loss_mse, train_psnr))
         logging.info("Train PSNR quartiles: %.2f, %.2f, %.2f" % tuple(percentiles_psnr))
+        run.log(
+            {
+                "epoch": epoch,
+                "train_loss": loss_mse,
+                "train_psnr_mean": train_psnr,
+                "train_psnr_quartiles": tuple(percentiles_psnr),
+                "elapsed_time": elapsed_time,
+                "elapsed_time_per_batch": elapsed_time / total_batches,
+            }
+        )
 
     if scheduler is not None:
         scheduler.step()

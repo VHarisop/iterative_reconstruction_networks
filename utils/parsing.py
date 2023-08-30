@@ -6,6 +6,18 @@ def setup_common_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Run a Neumann network experiment for image reconstruction."
     )
+    # wandb arguments
+    parser.add_argument("--wandb_entity", help="The entity to use on wandb", type=str)
+    parser.add_argument(
+        "--wandb_project_name", help="The project name on wandb", type=str
+    )
+    parser.add_argument(
+        "--wandb_mode",
+        help="One of ['online', 'offline', 'disabled']",
+        type=str,
+        choices=["online", "offline", "disabled"],
+        default="disabled",
+    )
     parser.add_argument("--data_folder", help="Root folder for the dataset", type=str)
     parser.add_argument(
         "--num_train_samples",

@@ -204,7 +204,7 @@ with torch.no_grad():
     for ii, (sample_batch, _) in enumerate(test_loader):
         sample_batch = sample_batch.to(device=_DEVICE_)
         y = measurement_process(sample_batch)
-        reconstruction = solver(y)
+        reconstruction = solver(y, iterations=args.num_solver_iterations)
         reconstruction = torch.clamp(reconstruction, -1, 1)
 
         # Evalute loss function

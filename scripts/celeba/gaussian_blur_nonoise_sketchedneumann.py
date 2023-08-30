@@ -106,13 +106,13 @@ measurement_process = forward_operator
 if args.sketch_type == "gaussian":
     sketched_forward_operator = NystromApproxBlurGaussian(
         forward_operator,
-        dim=128,
+        dim=64,
         rank=args.rank,
     )
 else:
     sketched_forward_operator = NystromApproxBlur(
         forward_operator,
-        dim=128,
+        dim=64,
         rank=args.rank,
         pivots=None,
     )

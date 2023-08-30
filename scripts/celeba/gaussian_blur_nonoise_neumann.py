@@ -120,7 +120,7 @@ lossfunction = torch.nn.MSELoss()
 # Training
 time_elapsed = 0.0
 for epoch in range(args.num_epochs):
-    if epoch % args.save_frequency:
+    if epoch % args.save_frequency == 0:
         torch.save(
             {
                 "solver_state_dict": solver.state_dict(),

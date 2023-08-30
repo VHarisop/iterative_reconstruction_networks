@@ -12,29 +12,12 @@ from networks.u_net import UnetModel
 from operators.nystrom import NystromApproxBlur, NystromApproxBlurGaussian
 from solvers.neumann import SketchedNeumannNet
 from utils.celeba_dataloader import create_dataloaders, create_datasets
+from utils.parsing import setup_common_parser
 from utils.train_utils import hash_dict
 
 
 def setup_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Run a Neumann network experiment for blurry image reconstruction."
-    )
-    parser.add_argument("--data_folder", help="Root folder for the dataset", type=str)
-    parser.add_argument(
-        "--num_train_samples",
-        help="Number of samples to use in training",
-        type=int,
-        default=30000,
-    )
-    parser.add_argument(
-        "--num_epochs", help="The number of training epochs", type=int, default=80
-    )
-    parser.add_argument(
-        "--num_solver_iterations",
-        help="The number of unrolled iterations",
-        type=int,
-        default=6,
-    )
+    parser = setup_common_parser()
     parser.add_argument(
         "--rank", help="The rank of the Nystrom approximation", type=int, default=10
     )
@@ -46,25 +29,11 @@ def setup_args() -> argparse.Namespace:
         required=True,
     )
     parser.add_argument(
-        "--kernel_size", help="The size of the blur kernel", type=int, default=5
-    )
-    parser.add_argument("--batch_size", help="The batch size", type=int, default=64)
-    parser.add_argument("--learning_rate", type=float, default=0.001)
-    parser.add_argument(
         "--algorithm_step_size",
         help="The initial step size of the algorithm",
         type=float,
         default=0.1,
     )
-
-    # Checkpointing options
-    parser.add_argument("--log_file_location", type=str, default="")
-    parser.add_argument("--save_frequency", type=int, default=5)
-    parser.add_argument("--save_location", type=str, default=os.getenv("HOME"))
-    parser.add_argument("--verbose", action="store_true")
-    # CUDA
-    parser.add_argument("--use_cuda", action="store_true")
-
     return parser.parse_args()
 
 
@@ -85,7 +54,6 @@ logging.basicConfig(
 logging.debug(f"Device = {_DEVICE_}")
 
 # Set up data and dataloaders
-# Set up data and dataloaders
 train_data, test_data = create_datasets(args.data_folder)
 train_loader, test_loader = create_dataloaders(
     train_data,
@@ -95,8 +63,7 @@ train_loader, test_loader = create_dataloaders(
 )
 logging.info(f"Using {args.num_train_samples} samples")
 
-### Set up solver and problem setting
-
+# Set up solver
 forward_operator = blurs.GaussianBlur(
     sigma=5.0, kernel_size=args.kernel_size, n_channels=3, n_spatial_dimensions=2
 ).to(device=_DEVICE_)
@@ -136,13 +103,11 @@ optimizer = optim.Adam(params=solver.parameters(), lr=args.learning_rate)
 scheduler = optim.lr_scheduler.StepLR(
     optimizer=optimizer, step_size=(args.num_epochs // 2), gamma=0.1
 )
-cpu_only = not torch.cuda.is_available()
 
 # set up loss and train
 lossfunction = torch.nn.MSELoss()
 
 # Training
-time_elapsed = 0.0
 for epoch in range(args.num_epochs):
     if epoch % args.save_frequency == 0:
         torch.save(

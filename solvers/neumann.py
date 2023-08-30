@@ -102,16 +102,6 @@ class PrecondNeumannNet(nn.Module):
     def _linear_gramian(self, x):
         return self.linear_op.gramian(x)
 
-    # This is a bit redundant
-    def initial_point(self, y):
-        preconditioned_input = conjugate_gradient(
-            self._linear_adjoint(y),
-            self._linear_gramian,
-            regularization_lambda=self.eta,
-            n_iterations=self.cg_iterations,
-        )
-        return preconditioned_input
-
     def single_block(self, input_tensor):
         preconditioned_step = conjugate_gradient(
             input_tensor,
@@ -122,7 +112,12 @@ class PrecondNeumannNet(nn.Module):
         return self.eta * preconditioned_step - self.nonlinear_op(input_tensor)
 
     def forward(self, y, iterations):
-        initial_point = self.eta * self.initial_point(y)
+        initial_point = conjugate_gradient(
+            self._linear_adjoint(y),
+            self._linear_gramian,
+            regularization_lambda=self.eta,
+            n_iterations=self.cg_iterations,
+        )
         running_term = initial_point
         accumulator = initial_point
 
@@ -152,8 +147,7 @@ class SketchedNeumannNet(nn.Module):
     rank: int
     linear_op: LinearOperator
     nonlinear_op: nn.Module
-    iterations: int
-    eta: torch.Tensor
+    eta: nn.Module | torch.Tensor
     sketch_op: NystromApproxBlur | NystromApproxBlurGaussian
     sketch_inverse_op: NystromApproxBlurInverse
 
@@ -163,13 +157,11 @@ class SketchedNeumannNet(nn.Module):
         sketched_operator: NystromApproxBlur | NystromApproxBlurGaussian,
         nonlinear_operator: nn.Module,
         lambda_initial_val: float = 0.1,
-        iterations: int = 6,
     ):
         super(SketchedNeumannNet, self).__init__()
         self.linear_op = linear_operator
         self.sketch_op = sketched_operator
         self.nonlinear_op = nonlinear_operator
-        self.iterations = iterations
 
         # Check if the linear operator has parameters that can be learned:
         # if so, register them to be learned as part of the network.
@@ -196,13 +188,11 @@ class SketchedNeumannNet(nn.Module):
             input_tensor
         )
 
-    def forward(self, input_tensor: torch.Tensor) -> torch.Tensor:
-        initial_point = self.eta * self.sketch_inverse_op(
-            self.linear_op.adjoint(input_tensor)
-        )
+    def forward(self, input_tensor: torch.Tensor, iterations: int) -> torch.Tensor:
+        initial_point = self.sketch_inverse_op(self.linear_op.adjoint(input_tensor))
         running_term = initial_point
         accumulator = initial_point
-        for _ in range(self.iterations):
+        for _ in range(iterations):
             running_term = self.single_block(running_term)
             accumulator = accumulator + running_term
 

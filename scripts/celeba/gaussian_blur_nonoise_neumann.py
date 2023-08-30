@@ -5,16 +5,13 @@ import time
 
 import numpy as np
 import torch
-import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import DataLoader, RandomSampler
-from torchvision import transforms
-from torchvision.datasets import CelebA
 
 import operators.blurs as blurs
 from networks.u_net import UnetModel
 from solvers.neumann import NeumannNet
 from utils.train_utils import hash_dict
+from utils.celeba_dataloader import create_datasets, create_dataloaders
 
 
 def setup_args() -> argparse.Namespace:
@@ -76,47 +73,14 @@ logging.basicConfig(
 logging.debug(f"Device = {_DEVICE_}")
 
 # Set up data and dataloaders
-transform = transforms.Compose(
-    [
-        transforms.Resize((128, 128)),
-        transforms.ToTensor(),
-        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
-    ]
-)
-
-# Create datasets and dataloaders.
-train_data = CelebA(
-    root=args.data_folder,
-    split="train",
-    transform=transform,
-    download=True,
-)
-train_sampler = RandomSampler(
-    train_data, replacement=False, num_samples=args.num_train_samples
+train_data, test_data = create_datasets(args.data_folder)
+train_loader, test_loader = create_dataloaders(
+    train_data,
+    test_data,
+    batch_size=args.batch_size,
+    num_train_samples=args.num_train_samples,
 )
 logging.info(f"Using {args.num_train_samples} samples")
-test_data = CelebA(
-    root=args.data_folder,
-    split="test",
-    transform=transform,
-    download=True,
-)
-
-train_loader = DataLoader(
-    dataset=train_data,
-    batch_size=args.batch_size,
-    sampler=train_sampler,
-    pin_memory=True,
-    shuffle=False,
-    drop_last=True,
-)
-test_loader = DataLoader(
-    dataset=test_data,
-    batch_size=args.batch_size,
-    pin_memory=True,
-    shuffle=False,
-    drop_last=False,
-)
 
 ### Set up solver and problem setting
 
@@ -142,7 +106,6 @@ solver = NeumannNet(
     nonlinear_operator=learned_component,
     eta_initial_val=args.algorithm_step_size,
 )
-
 solver = solver.to(device=_DEVICE_)
 
 optimizer = optim.Adam(params=solver.parameters(), lr=args.learning_rate)

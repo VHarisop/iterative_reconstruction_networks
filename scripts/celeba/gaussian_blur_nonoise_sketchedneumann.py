@@ -6,14 +6,12 @@ import time
 import numpy as np
 import torch
 import torch.optim as optim
-from torch.utils.data import DataLoader, RandomSampler
-from torchvision import transforms
-from torchvision.datasets import CelebA
 
 import operators.blurs as blurs
 from networks.u_net import UnetModel
 from operators.nystrom import NystromApproxBlur, NystromApproxBlurGaussian
 from solvers.neumann import SketchedNeumannNet
+from utils.celeba_dataloader import create_dataloaders, create_datasets
 from utils.train_utils import hash_dict
 
 
@@ -88,47 +86,15 @@ logging.basicConfig(
 logging.debug(f"Device = {_DEVICE_}")
 
 # Set up data and dataloaders
-transform = transforms.Compose(
-    [
-        transforms.Resize((128, 128)),
-        transforms.ToTensor(),
-        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
-    ]
-)
-
-# Create datasets and dataloaders.
-train_data = CelebA(
-    root=args.data_folder,
-    split="train",
-    transform=transform,
-    download=True,
-)
-train_sampler = RandomSampler(
-    train_data, replacement=False, num_samples=args.num_train_samples
+# Set up data and dataloaders
+train_data, test_data = create_datasets(args.data_folder)
+train_loader, test_loader = create_dataloaders(
+    train_data,
+    test_data,
+    batch_size=args.batch_size,
+    num_train_samples=args.num_train_samples,
 )
 logging.info(f"Using {args.num_train_samples} samples")
-test_data = CelebA(
-    root=args.data_folder,
-    split="test",
-    transform=transform,
-    download=True,
-)
-
-train_loader = DataLoader(
-    dataset=train_data,
-    batch_size=args.batch_size,
-    sampler=train_sampler,
-    pin_memory=True,
-    shuffle=False,
-    drop_last=True,
-)
-test_loader = DataLoader(
-    dataset=test_data,
-    batch_size=args.batch_size,
-    pin_memory=True,
-    shuffle=False,
-    drop_last=False,
-)
 
 ### Set up solver and problem setting
 
@@ -164,9 +130,7 @@ solver = SketchedNeumannNet(
     sketched_operator=sketched_forward_operator,
     nonlinear_operator=learned_component,
     lambda_initial_val=args.algorithm_step_size,
-    iterations=args.num_solver_iterations,
 )
-
 solver = solver.to(device=_DEVICE_)
 
 optimizer = optim.Adam(params=solver.parameters(), lr=args.learning_rate)
@@ -200,7 +164,7 @@ for epoch in range(args.num_epochs):
         sample_batch = sample_batch.to(device=_DEVICE_)
         y = forward_operator(sample_batch)
         # Reconstruct image using `num_solver_iterations` unrolled iterations.
-        reconstruction = solver(y)
+        reconstruction = solver(y, iterations=args.num_solver_iterations)
         reconstruction = torch.clamp(reconstruction, -1, 1)
 
         # Evaluate loss function and take gradient step.
@@ -220,7 +184,7 @@ for epoch in range(args.num_epochs):
         for idx, (sample_batch, _) in enumerate(train_loader):
             sample_batch = sample_batch.to(_DEVICE_)
             y = forward_operator(sample_batch)
-            reconstruction = solver(y)
+            reconstruction = solver(y, iterations=args.num_solver_iterations)
             reconstruction = torch.clamp(reconstruction, -1, 1)
             # Append loss to accumulator
             loss_accumulator.append(lossfunction(reconstruction, sample_batch).item())

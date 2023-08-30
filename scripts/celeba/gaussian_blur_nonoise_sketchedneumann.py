@@ -72,7 +72,6 @@ args = setup_args()
 if args.use_cuda:
     if torch.cuda.is_available():
         _DEVICE_ = torch.device("cuda:0")
-        logging.info("Using CUDA")
     else:
         raise ValueError("CUDA is not available!")
 else:

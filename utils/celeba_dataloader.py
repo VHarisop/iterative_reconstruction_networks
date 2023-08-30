@@ -1,3 +1,5 @@
+from random import sample
+
 from typing import Tuple
 from torch.utils.data import DataLoader, Subset
 from torchvision.datasets import CelebA
@@ -32,18 +34,20 @@ def create_dataloaders(
     if num_train_samples is not None:
         subset = Subset(
             train_data,
-            indices=np.random.permutation(len(train_data))[:num_train_samples],
+            sample(range(len(train_data)), k=num_train_samples),
         )
         data = subset
     else:
         data = train_data
+    num_cpus = os.cpu_count()
+    num_workers = min(num_cpus // 2, 2) if num_cpus is not None else 0
     train_loader = DataLoader(
         data,
         batch_size=batch_size,
         shuffle=True,
         drop_last=True,
         pin_memory=True,
-        num_workers=min(os.cpu_count() // 2, 2),
+        num_workers=num_workers,
         persistent_workers=True,
     )
     test_loader = DataLoader(
@@ -52,7 +56,7 @@ def create_dataloaders(
         shuffle=False,
         drop_last=False,
         pin_memory=True,
-        num_workers=min(os.cpu_count() // 2, 2),
+        num_workers=num_workers,
         persistent_workers=True,
     )
     return train_loader, test_loader

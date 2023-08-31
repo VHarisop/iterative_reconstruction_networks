@@ -72,13 +72,13 @@ def setup_common_parser() -> argparse.ArgumentParser:
         "--save_frequency",
         help="The frequency with which to save network parameters",
         type=int,
-        default=5,
+        required=True,
     )
     parser.add_argument(
         "--save_location",
         help="Path to the saved network weights",
         type=str,
-        default=os.getenv("HOME"),
+        required=True,
     )
     parser.add_argument(
         "--verbose", help="Set to log additional information", action="store_true"

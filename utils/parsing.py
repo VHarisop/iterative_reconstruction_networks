@@ -1,5 +1,26 @@
 import argparse
+import itertools
 import os
+from typing import Dict, Iterable
+
+import yaml
+
+
+def experiment_config_from_yaml_file(filename: str) -> Iterable[Dict]:
+    """Create a sequence of experiment configurations from a YAML file.
+
+    Args:
+        filename: Path to the YAML file.
+
+    Returns:
+        A generator of dictionaries containing experiment configurations.
+    """
+    with open(filename, "r") as f:
+        contents = yaml.safe_load(f)
+    params = contents.keys()
+    return (
+        dict(zip(params, config)) for config in itertools.product(*contents.values())
+    )
 
 
 def setup_common_parser() -> argparse.ArgumentParser:

@@ -85,7 +85,6 @@ def run_sweep():
             ntasks=1,
             gres="gpu:1",
             job_name=job_name,
-            time=datetime.timedelta(hours=4),
             mem="8G",
             mail_type="FAIL",
             mail_user="vchariso@uchicago.edu",
@@ -120,7 +119,6 @@ def run_sweep():
             --save_frequency={experiment_config["save_frequency"]} \
             --algorithm_step_size={experiment_config["algorithm_step_size"]} \
             {solver} {solver_param_str}""",
-            shell="/bin/bash",
         )
 
 

@@ -66,6 +66,12 @@ def setup_common_parser() -> argparse.ArgumentParser:
         default=0.001,
     )
     parser.add_argument(
+        "--algorithm_step_size",
+        help="The initial step size of the algorithm",
+        type=float,
+        default=0.9,
+    )
+    parser.add_argument(
         "--log_file_location", help="Path to a log file", type=str, default=""
     )
     parser.add_argument(

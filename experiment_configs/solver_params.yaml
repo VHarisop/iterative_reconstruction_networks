@@ -1,0 +1,15 @@
+- solver:
+    - sketchedneumann
+  rank:
+    - 5
+    - 10
+  dim:
+    - 64
+  sketch_type:
+    - gaussian
+    - column
+- solver:
+    - precondneumann
+  cg_iterations:
+    - 10
+    - 20

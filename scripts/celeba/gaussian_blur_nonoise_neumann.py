@@ -6,11 +6,12 @@ import time
 import numpy as np
 import torch
 import torch.optim as optim
+import wandb
 
 import operators.blurs as blurs
-import wandb
+import operators.nystrom as nystrom
 from networks.u_net import UnetModel
-from solvers.neumann import NeumannNet
+from solvers.neumann import NeumannNet, PrecondNeumannNet, SketchedNeumannNet
 from utils.celeba_dataloader import create_dataloaders, create_datasets
 from utils.parsing import setup_common_parser
 from utils.train_utils import hash_dict
@@ -18,11 +19,36 @@ from utils.train_utils import hash_dict
 
 def setup_args() -> argparse.Namespace:
     parser = setup_common_parser()
-    parser.add_argument(
-        "--algorithm_step_size",
-        help="The initial step size of the algorithm",
-        type=float,
-        default=0.1,
+    # Create subparsers
+    subparsers = parser.add_subparsers(help="The network type", dest="solver")
+    parser_precondneumann = subparsers.add_parser("precondneumann", help="A preconditioned Neumann network")
+    parser_precondneumann.add_argument(
+        "--cg_iterations",
+        help="The number of CG iterations",
+        type=int,
+        default=10,
+    )
+    parser_sketchedneumann = subparsers.add_parser(
+        "sketchedneumann",
+        help="A preconditioned Neumann network with sketching",
+    )
+    parser_sketchedneumann.add_argument(
+        "--dim",
+        help="The number of rows/columns of the input images",
+        type=int,
+        required=True,
+    )
+    parser_sketchedneumann.add_argument(
+        "--rank",
+        help="The rank of the low-rank approximation",
+        type=int,
+        required=True,
+    )
+    parser_sketchedneumann.add_argument(
+        "--sketch_type",
+        choices=["gaussian", "column"],
+        type=str,
+        default="column",
     )
     return parser.parse_args()
 
@@ -40,7 +66,6 @@ def main():
     # Set up logging
     logging.basicConfig(
         level=(logging.DEBUG if args.verbose else logging.INFO),
-        filename=args.log_file_location,
     )
     logging.debug(f"Device = {_DEVICE_}")
 
@@ -84,11 +109,40 @@ def main():
         drop_prob=0.0,
         chans=32,
     )
-    solver = NeumannNet(
-        linear_operator=internal_forward_operator,
-        nonlinear_operator=learned_component,
-        eta_initial_val=args.algorithm_step_size,
-    )
+    if args.solver == "precondneumann":
+        solver = PrecondNeumannNet(
+            linear_operator=internal_forward_operator,
+            nonlinear_operator=learned_component,
+            lambda_initial_val=args.algorithm_step_size,
+            cg_iterations=args.cg_iterations,
+        )
+    elif args.solver == "sketchedneumann":
+        if args.sketch_type == "column":
+            sketched_operator = nystrom.NystromApproxBlur(
+                lin_op=internal_forward_operator,
+                dim=args.dim,
+                rank=args.rank,
+                pivots=None,
+            )
+        else:
+            sketched_operator = nystrom.NystromApproxBlurGaussian(
+                lin_op=internal_forward_operator,
+                dim=args.dim,
+                rank=args.rank,
+            )
+        solver = SketchedNeumannNet(
+            linear_operator=internal_forward_operator,
+            sketched_operator=sketched_operator,
+            nonlinear_operator=learned_component,
+            lambda_initial_val=args.algorithm_step_size,
+        )
+    else:
+        solver = NeumannNet(
+            linear_operator=internal_forward_operator,
+            nonlinear_operator=learned_component,
+            eta_initial_val=args.algorithm_step_size,
+        )
+    # Move solver to CUDA device, if necessary.
     solver = solver.to(device=_DEVICE_)
 
     optimizer = optim.Adam(params=solver.parameters(), lr=args.learning_rate)
@@ -164,6 +218,10 @@ def main():
                     "train_psnr_quartiles": tuple(percentiles_psnr),
                     "elapsed_time": elapsed_time,
                     "elapsed_time_per_batch": elapsed_time / total_batches,
+                    "save_path": os.path.join(
+                        args.save_location,
+                        f"{hash_dict(vars(args))}_{epoch}.pt"
+                    ),
                 }
             )
 

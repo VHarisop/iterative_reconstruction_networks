@@ -1,5 +1,6 @@
 import argparse
 import datetime
+import itertools
 import os
 from typing import Any, Dict
 
@@ -34,14 +35,25 @@ def setup_args() -> argparse.Namespace:
         "--wandb_mode", choices=["online", "offline", "disabled"], default="offline"
     )
     parser.add_argument(
-        "--config_file", help="Path to the configuration file", type=str
+        "--solver_param_config_file", help="Path to the solver param config file", type=str, required=True,
+    )
+    parser.add_argument(
+        "--common_param_config_file", help="Path to the common param config file", type=str, required=True,
+    )
+    parser.add_argument(
+        "--data_folder", help="Root folder for the dataset", type=str, required=True,
+    )
+    parser.add_argument(
+        "--save_location", help="Folder to store network weights in", type=str, required=True,
+    )
+    parser.add_argument(
+        "--use_cuda", help="Set to use CUDA acceleration if available", action="store_true",
     )
     return parser.parse_args()
 
 
-def validate_experiment_config(config: Dict[str, Any]):
+def validate_common_experiment_config(config: Dict[str, Any]):
     required_keys = {
-        "data_folder",
         "num_train_samples",
         "num_epochs",
         "num_solver_iterations",
@@ -49,9 +61,6 @@ def validate_experiment_config(config: Dict[str, Any]):
         "batch_size",
         "learning_rate",
         "save_frequency",
-        "save_location",
-        "verbose",
-        "use_cuda",
         "algorithm_step_size",
     }
     missing_keys = required_keys - set(config)
@@ -61,11 +70,13 @@ def validate_experiment_config(config: Dict[str, Any]):
 
 def run_sweep():
     args = setup_args()
-    experiment_configs = experiment_config_from_yaml_file(args.config_file)
-    for config in experiment_configs:
-        validate_experiment_config(config)
+    common_param_configs = experiment_config_from_yaml_file(args.common_param_config_file)
+    solver_param_configs = experiment_config_from_yaml_file(args.solver_param_config_file)
+    for (param_config, solver_config) in itertools.product(common_param_configs, solver_param_configs):
+        validate_common_experiment_config(param_config)
         # Set up experiment
-        experiment_id = hash_dict(config)
+        experiment_config = {**param_config, **solver_config}
+        experiment_id = hash_dict(experiment_config)
         job_name = f"{args.wandb_project_name}_{experiment_id}"
         # Create a slurm job
         slurm_job = Slurm(
@@ -88,24 +99,27 @@ def run_sweep():
             ),
             requeue="",
         )
+        # Extract the subcommand and subcommand-specific params
+        solver = solver_config.pop("solver")
+        solver_param_str = " ".join("--{k}={v}".format(k=k, v=v) for k, v in solver_config.items())
         slurm_job.sbatch(
             f"""PYTHONPATH=$(pwd) python {args.path_to_script} \
             --wandb_mode={args.wandb_mode} \
             --wandb_entity={args.wandb_entity} \
             --wandb_project_name={args.wandb_project_name} \
-            --data_folder={config["data_folder"]} \
-            --num_train_samples={config["num_train_samples"]} \
-            --num_epochs={config["num_epochs"]} \
-            --num_solver_iterations={config["num_solver_iterations"]} \
-            --kernel_size={config["kernel_size"]} \
-            --batch_size={config["batch_size"]} \
-            --learning_rate={config["learning_rate"]} \
-            --log_file_location={config["log_file_location"]} \
-            --save_frequency={config["save_frequency"]} \
-            --save_location={config["save_location"]} \
-            {"--verbose" if config["verbose"] else ""} \
-            {"--use_cuda" if config["use_cuda"] else ""} \
-            --algorithm_step_size={config["algorithm_step_size"]}""",
+            --data_folder={args.data_folder} \
+            --save_location={args.save_location} \
+            {"--use_cuda" if args.use_cuda else ""} \
+            --verbose \
+            --num_train_samples={experiment_config["num_train_samples"]} \
+            --num_epochs={experiment_config["num_epochs"]} \
+            --num_solver_iterations={experiment_config["num_solver_iterations"]} \
+            --kernel_size={experiment_config["kernel_size"]} \
+            --batch_size={experiment_config["batch_size"]} \
+            --learning_rate={experiment_config["learning_rate"]} \
+            --save_frequency={experiment_config["save_frequency"]} \
+            --algorithm_step_size={experiment_config["algorithm_step_size"]} \
+            {solver} {solver_param_str}""",
             shell="/bin/bash",
         )
 

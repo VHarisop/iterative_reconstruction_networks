@@ -21,7 +21,9 @@ def setup_args() -> argparse.Namespace:
     parser = setup_common_parser()
     # Create subparsers
     subparsers = parser.add_subparsers(help="The network type", dest="solver")
-    parser_precondneumann = subparsers.add_parser("precondneumann", help="A preconditioned Neumann network")
+    parser_precondneumann = subparsers.add_parser(
+        "precondneumann", help="A preconditioned Neumann network"
+    )
     parser_precondneumann.add_argument(
         "--cg_iterations",
         help="The number of CG iterations",
@@ -219,8 +221,7 @@ def main():
                     "elapsed_time": elapsed_time,
                     "elapsed_time_per_batch": elapsed_time / total_batches,
                     "save_path": os.path.join(
-                        args.save_location,
-                        f"{hash_dict(vars(args))}_{epoch}.pt"
+                        args.save_location, f"{hash_dict(vars(args))}_{epoch}.pt"
                     ),
                 }
             )

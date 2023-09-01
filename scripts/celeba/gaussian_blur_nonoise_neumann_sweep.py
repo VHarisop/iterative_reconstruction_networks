@@ -35,19 +35,33 @@ def setup_args() -> argparse.Namespace:
         "--wandb_mode", choices=["online", "offline", "disabled"], default="offline"
     )
     parser.add_argument(
-        "--solver_param_config_file", help="Path to the solver param config file", type=str, required=True,
+        "--solver_param_config_file",
+        help="Path to the solver param config file",
+        type=str,
+        required=True,
     )
     parser.add_argument(
-        "--common_param_config_file", help="Path to the common param config file", type=str, required=True,
+        "--common_param_config_file",
+        help="Path to the common param config file",
+        type=str,
+        required=True,
     )
     parser.add_argument(
-        "--data_folder", help="Root folder for the dataset", type=str, required=True,
+        "--data_folder",
+        help="Root folder for the dataset",
+        type=str,
+        required=True,
     )
     parser.add_argument(
-        "--save_location", help="Folder to store network weights in", type=str, required=True,
+        "--save_location",
+        help="Folder to store network weights in",
+        type=str,
+        required=True,
     )
     parser.add_argument(
-        "--use_cuda", help="Set to use CUDA acceleration if available", action="store_true",
+        "--use_cuda",
+        help="Set to use CUDA acceleration if available",
+        action="store_true",
     )
     return parser.parse_args()
 
@@ -70,9 +84,15 @@ def validate_common_experiment_config(config: Dict[str, Any]):
 
 def run_sweep():
     args = setup_args()
-    common_param_configs = experiment_config_from_yaml_file(args.common_param_config_file)
-    solver_param_configs = experiment_config_from_yaml_file(args.solver_param_config_file)
-    for (param_config, solver_config) in itertools.product(common_param_configs, solver_param_configs):
+    common_param_configs = tuple(
+        experiment_config_from_yaml_file(args.common_param_config_file)
+    )
+    solver_param_configs = tuple(
+        experiment_config_from_yaml_file(args.solver_param_config_file)
+    )
+    for param_config, solver_config in itertools.product(
+        common_param_configs, solver_param_configs
+    ):
         validate_common_experiment_config(param_config)
         # Set up experiment
         experiment_config = {**param_config, **solver_config}
@@ -100,7 +120,9 @@ def run_sweep():
         )
         # Extract the subcommand and subcommand-specific params
         solver = solver_config.pop("solver")
-        solver_param_str = " ".join("--{k}={v}".format(k=k, v=v) for k, v in solver_config.items())
+        solver_param_str = " ".join(
+            "--{k}={v}".format(k=k, v=v) for k, v in solver_config.items()
+        )
         slurm_job.sbatch(
             f"""PYTHONPATH=$(pwd) python {args.path_to_script} \
             --wandb_mode={args.wandb_mode} \

@@ -107,6 +107,8 @@ def run_sweep():
             job_name=job_name,
             mem="8G",
             mail_type="FAIL",
+            partition="general",
+            time=datetime.timedelta(hours=4),
             mail_user="vchariso@uchicago.edu",
             output=os.path.join(
                 args.slurm_log_folder_base,
@@ -119,9 +121,13 @@ def run_sweep():
             requeue="",
         )
         # Extract the subcommand and subcommand-specific params
-        solver = solver_config.pop("solver")
+        # The following line is subtle: we make a copy of the solver_config,
+        # since itertools.product is using deep copies and the first time we
+        # pop the 'solver' field pops it for all future appearances.
+        solver_params = dict(solver_config)
+        solver = solver_params.pop("solver")
         solver_param_str = " ".join(
-            "--{k}={v}".format(k=k, v=v) for k, v in solver_config.items()
+            "--{k}={v}".format(k=k, v=v) for k, v in solver_params.items()
         )
         slurm_job.sbatch(
             f"""PYTHONPATH=$(pwd) python {args.path_to_script} \

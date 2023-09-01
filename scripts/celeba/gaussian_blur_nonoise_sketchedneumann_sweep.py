@@ -10,11 +10,13 @@ from utils.train_utils import hash_dict
 
 
 def setup_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run a neumann network training sweep")
+    parser = argparse.ArgumentParser(
+        description="Run a sketched neumann network training sweep"
+    )
     parser.add_argument(
         "--path_to_script",
-        help="Path to the script (default: scripts/celeba/gaussian_blur_nonoise_neumann.py)",
-        default="scripts/celeba/gaussian_blur_nonoise_neumann.py",
+        help="Path to the script (default: scripts/celeba/gaussian_blur_nonoise_sketchedeumann.py)",
+        default="scripts/celeba/gaussian_blur_nonoise_sketchedneumann.py",
     )
     parser.add_argument(
         "--slurm_log_folder_base",
@@ -53,6 +55,8 @@ def validate_experiment_config(config: Dict[str, Any]):
         "verbose",
         "use_cuda",
         "algorithm_step_size",
+        "dim",
+        "rank",
     }
     missing_keys = required_keys - set(config)
     if len(missing_keys) > 0:
@@ -105,7 +109,8 @@ def run_sweep():
             --save_location={config["save_location"]} \
             {"--verbose" if config["verbose"] else ""} \
             {"--use_cuda" if config["use_cuda"] else ""} \
-            --algorithm_step_size={config["algorithm_step_size"]}""",
+            --algorithm_step_size={config["algorithm_step_size"]} \
+            --dim={config["dim"]} --rank={config["rank"]}""",
             shell="/bin/bash",
         )
 

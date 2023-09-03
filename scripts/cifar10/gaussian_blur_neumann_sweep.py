@@ -101,7 +101,7 @@ def run_sweep():
         job_name = f"{args.wandb_project_name}_{experiment_id}"
         # Create a slurm job
         slurm_job = Slurm(
-            cpus_per_task=4,
+            cpus_per_task=8,
             nodes=1,
             ntasks=1,
             gres="gpu:1",

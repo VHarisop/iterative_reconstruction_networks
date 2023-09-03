@@ -21,7 +21,10 @@ from utils.train_utils import hash_dict
 def setup_args() -> argparse.Namespace:
     parser = setup_common_parser()
     parser.add_argument(
-        "--noise_variance", help="The variance of the measurement noise", type=float, default=5.0,
+        "--noise_variance",
+        help="The variance of the measurement noise",
+        type=float,
+        default=0.0,
     )
     # Create subparsers
     subparsers = parser.add_subparsers(help="The network type", dest="solver")

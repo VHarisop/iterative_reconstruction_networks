@@ -10,6 +10,7 @@ import wandb
 
 import operators.blurs as blurs
 import operators.nystrom as nystrom
+from operators.operator import OperatorPlusNoise
 from networks.u_net import UnetModel
 from solvers.neumann import NeumannNet, PrecondNeumannNet, SketchedNeumannNet
 from utils.celeba_dataloader import create_dataloaders, create_datasets
@@ -19,6 +20,12 @@ from utils.train_utils import hash_dict
 
 def setup_args() -> argparse.Namespace:
     parser = setup_common_parser()
+    parser.add_argument(
+        "--noise_variance",
+        help="The variance of the measurement noise",
+        type=float,
+        default=0.0,
+    )
     # Create subparsers
     subparsers = parser.add_subparsers(help="The network type", dest="solver")
     parser_precondneumann = subparsers.add_parser(
@@ -33,12 +40,6 @@ def setup_args() -> argparse.Namespace:
     parser_sketchedneumann = subparsers.add_parser(
         "sketchedneumann",
         help="A preconditioned Neumann network with sketching",
-    )
-    parser_sketchedneumann.add_argument(
-        "--dim",
-        help="The number of rows/columns of the input images",
-        type=int,
-        required=True,
     )
     parser_sketchedneumann.add_argument(
         "--rank",
@@ -94,14 +95,16 @@ def main():
     logging.info(f"Using {args.num_train_samples} samples")
 
     # Set up solver
-    forward_operator = blurs.GaussianBlur(
-        sigma=5.0, kernel_size=args.kernel_size, n_channels=3, n_spatial_dimensions=2
-    ).to(device=_DEVICE_)
-    measurement_process = forward_operator
-
     internal_forward_operator = blurs.GaussianBlur(
         sigma=5.0, kernel_size=args.kernel_size, n_channels=3, n_spatial_dimensions=2
     ).to(device=_DEVICE_)
+    if args.noise_variance > 0.0:
+        measurement_process = OperatorPlusNoise(
+            internal_forward_operator,
+            noise_sigma=np.sqrt(args.noise_variance),
+        )
+    else:
+        measurement_process = internal_forward_operator
 
     # standard u-net
     learned_component = UnetModel(
@@ -122,14 +125,14 @@ def main():
         if args.sketch_type == "column":
             sketched_operator = nystrom.NystromApproxBlur(
                 lin_op=internal_forward_operator,
-                dim=args.dim,
+                dim=64,
                 rank=args.rank,
                 pivots=None,
             )
         else:
             sketched_operator = nystrom.NystromApproxBlurGaussian(
                 lin_op=internal_forward_operator,
-                dim=args.dim,
+                dim=64,
                 rank=args.rank,
             )
         solver = SketchedNeumannNet(
@@ -175,7 +178,7 @@ def main():
         for idx, (sample_batch, _) in enumerate(train_loader):
             optimizer.zero_grad()
             sample_batch = sample_batch.to(device=_DEVICE_)
-            y = forward_operator(sample_batch)
+            y = measurement_process(sample_batch)
             # Reconstruct image using `num_solver_iterations` unrolled iterations.
             reconstruction = solver(y, iterations=args.num_solver_iterations)
             reconstruction = torch.clamp(reconstruction, -1, 1)
@@ -197,7 +200,7 @@ def main():
             loss_accumulator = []
             for idx, (sample_batch, _) in enumerate(train_loader):
                 sample_batch = sample_batch.to(_DEVICE_)
-                y = forward_operator(sample_batch)
+                y = measurement_process(sample_batch)
                 reconstruction = solver(y, iterations=args.num_solver_iterations)
                 reconstruction = torch.clamp(reconstruction, -1, 1)
                 # Append loss to accumulator

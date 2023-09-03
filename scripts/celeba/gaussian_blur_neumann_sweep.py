@@ -14,8 +14,8 @@ def setup_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run a neumann network training sweep")
     parser.add_argument(
         "--path_to_script",
-        help="Path to the script (default: scripts/celeba/gaussian_blur_nonoise_neumann.py)",
-        default="scripts/celeba/gaussian_blur_nonoise_neumann.py",
+        help="Path to the script (default: scripts/celeba/gaussian_blur_neumann.py)",
+        default="scripts/celeba/gaussian_blur_neumann.py",
     )
     parser.add_argument(
         "--slurm_log_folder_base",
@@ -76,6 +76,7 @@ def validate_common_experiment_config(config: Dict[str, Any]):
         "learning_rate",
         "save_frequency",
         "algorithm_step_size",
+        "noise_variance",
     }
     missing_keys = required_keys - set(config)
     if len(missing_keys) > 0:
@@ -100,7 +101,7 @@ def run_sweep():
         job_name = f"{args.wandb_project_name}_{experiment_id}"
         # Create a slurm job
         slurm_job = Slurm(
-            cpus_per_task=1,
+            cpus_per_task=8,
             nodes=1,
             ntasks=1,
             gres="gpu:1",
@@ -146,6 +147,7 @@ def run_sweep():
             --learning_rate={experiment_config["learning_rate"]} \
             --save_frequency={experiment_config["save_frequency"]} \
             --algorithm_step_size={experiment_config["algorithm_step_size"]} \
+            --noise_variance={experiment_config["noise_variance"]} \
             {solver} {solver_param_str}""",
         )
 

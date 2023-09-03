@@ -3,8 +3,6 @@
   rank:
     - 5
     - 10
-  dim:
-    - 64
   sketch_type:
     - gaussian
     - column

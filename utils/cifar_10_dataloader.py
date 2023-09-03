@@ -16,10 +16,16 @@ def create_datasets(root_folder: str) -> Tuple[CIFAR10, CIFAR10]:
         ],
     )
     train_data = CIFAR10(
-        root=root_folder, train=True, transform=transform, download=True,
+        root=root_folder,
+        train=True,
+        transform=transform,
+        download=True,
     )
     test_data = CIFAR10(
-        root=root_folder, train=False, transform=transform, download=True,
+        root=root_folder,
+        train=False,
+        transform=transform,
+        download=True,
     )
     return train_data, test_data
 

@@ -1,9 +1,9 @@
 import torch
 import torch.nn as nn
-from operators.blurs import GaussianBlur
 
-from operators.nystrom import NystromApproxBlur, NystromApproxBlurGaussian
-from operators.nystrom import NystromApproxBlurInverse
+from operators.blurs import GaussianBlur
+from operators.nystrom import (NystromApproxBlur, NystromApproxBlurGaussian,
+                               NystromApproxBlurInverse, NystromPreconditioner)
 from operators.operator import LinearOperator
 from solvers.cg_utils import conjugate_gradient
 
@@ -192,6 +192,101 @@ class SketchedNeumannNet(nn.Module):
         initial_point = self.sketch_inverse_op(self.linear_op.adjoint(input_tensor))
         running_term = initial_point
         accumulator = initial_point
+        for _ in range(iterations):
+            running_term = self.single_block(running_term)
+            accumulator = accumulator + running_term
+
+        return accumulator
+
+
+class RPCholeskyPrecondNeumannNet(nn.Module):
+    """A preconditioned Neumann network using the RPCholesky preconditioner.
+
+    Attributes:
+        linear_op: The linear operator.
+        nystrom_op: The Nystrom approximation of the gramian of `linear_op`.
+        nystrom_preconditioner: The Nystrom preconditioner.
+        nonlinear_op: The nonlinear operator, which is often a learned component.
+        cg_iterations: The number of CG iterations to unroll when computing
+            inverses.
+        eta: The amount of preconditioning added.
+    """
+
+    linear_op: LinearOperator
+    nystrom_op: NystromApproxBlur | NystromApproxBlurGaussian
+    nystrom_preconditioner: NystromPreconditioner
+    nonlinear_op: nn.Module
+    cg_iterations: int
+    eta: nn.Module | torch.Tensor
+
+    def __init__(
+        self,
+        linear_operator,
+        nystrom_op,
+        nonlinear_operator,
+        lambda_initial_val=0.1,
+        cg_iterations=10,
+    ):
+        super(PrecondNeumannNet, self).__init__()
+        self.linear_op = linear_operator
+        self.nonlinear_op = nonlinear_operator
+        self.cg_iterations = cg_iterations
+        self.nystrom_op = nystrom_op
+
+        # Check if the linear operator has parameters that can be learned:
+        # if so, register them to be learned as part of the network.
+        linear_param_name = "linear_param_"
+        for ii, parameter in enumerate(self.linear_op.parameters()):
+            parameter_name = linear_param_name + str(ii)
+            self.register_parameter(name=parameter_name, param=parameter)
+
+        self.register_parameter(
+            name="eta",
+            param=torch.nn.Parameter(
+                torch.tensor(lambda_initial_val), requires_grad=True
+            ),
+        )
+
+        # Create the preconditioner
+        self.nystrom_preconditioner = NystromPreconditioner(self.nystrom_op, self.eta)
+
+    def _linear_op(self, x):
+        return self.linear_op.forward(x)
+
+    def _linear_adjoint(self, x):
+        return self.linear_op.adjoint(x)
+
+    def _linear_gramian(self, x):
+        return self.linear_op.gramian(x)
+
+    # Solve a linear system using RPCholesky preconditioning.
+    def _solve_system(self, input_tensor: torch.Tensor):
+        def pcg_op(x: torch.Tensor):
+            x = self.nystrom_preconditioner(x)
+            x = self._linear_gramian(x) + self.eta * x
+            return self.nystrom_preconditioner(x)
+
+        pcg_rhs = self.nystrom_preconditioner(input_tensor)
+        return self.nystrom_preconditioner(
+            conjugate_gradient(
+                pcg_rhs,
+                pcg_op,
+                regularization_lambda=0.0,
+                n_iterations=self.cg_iterations,
+            )
+        )
+
+    def single_block(self, input_tensor):
+        preconditioned_step = self._solve_system(input_tensor)
+        return self.eta * preconditioned_step - self.nonlinear_op(input_tensor)
+
+    def forward(self, y, iterations):
+        initial_point = self._solve_system(
+            self._linear_adjoint(y),
+        )
+        running_term = initial_point
+        accumulator = initial_point
+
         for _ in range(iterations):
             running_term = self.single_block(running_term)
             accumulator = accumulator + running_term

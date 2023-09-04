@@ -1,11 +1,10 @@
 import logging
 from typing import List, Set, Tuple
-from cv2.dnn import NMSBoxes
 
 import numpy as np
-from numpy.random import choice
 import torch
 import torch.nn.functional as torchfunc
+from numpy.random import choice
 
 from .blurs import GaussianBlur
 from .operator import LinearOperator, SelfAdjointLinearOperator
@@ -221,6 +220,36 @@ class NystromFactoredInverseOperator(SelfAdjointLinearOperator):
             ).view(x.shape)
         else:
             return (1 / self.shift) * (x - self.U @ (self.scale_vec * (self.U.T @ x)))
+
+
+class NystromPreconditioner(SelfAdjointLinearOperator):
+    """A Nystrom-based preconditioner for a Gaussian blur."""
+
+    U: torch.Tensor
+    S: torch.Tensor
+    mu: torch.Tensor
+    scale_vec: torch.Tensor
+    dim: int
+
+    def __init__(
+        self, nys_op: NystromApproxBlur | NystromApproxBlurGaussian, mu: torch.Tensor
+    ):
+        super().__init__()
+        self.nystrom_factor = nys_op.nystrom_factor.t()
+        self.dim = nys_op.dim
+        self.U, self.S, _ = torch.linalg.svd(self.nystrom_factor, full_matrices=False)
+        self.mu = mu
+        self.scale_vec = torch.sqrt(1 / (self.S**2 + self.mu))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        orig_size = x.size()
+        z = x.view(*orig_size[:-2], self.dim**2)
+        # Reshape x so that the last dimension is the flattened image.
+        Ux = z @ self.U
+        return (
+            ((Ux) * self.scale_vec) @ self.U.T
+            + torch.sqrt(1 / self.mu) * (z - Ux @ self.U.T)
+        ).view(*orig_size)
 
 
 @torch.no_grad()

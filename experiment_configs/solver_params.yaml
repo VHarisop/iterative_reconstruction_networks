@@ -1,8 +1,9 @@
 - solver:
     - sketchedneumann
   rank:
-    - 5
-    - 10
+    - 8
+    - 16
+    - 32
   sketch_type:
     - gaussian
     - column
@@ -10,4 +11,3 @@
     - precondneumann
   cg_iterations:
     - 10
-    - 20

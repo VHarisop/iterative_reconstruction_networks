@@ -15,7 +15,7 @@ from operators.operator import OperatorPlusNoise
 from solvers.neumann import NeumannNet, PrecondNeumannNet, SketchedNeumannNet
 from utils.cifar_10_dataloader import create_dataloaders, create_datasets
 from utils.parsing import setup_common_parser
-from utils.train_utils import hash_dict
+from utils.train_utils import evaluate_batch_loss, hash_dict
 
 
 def setup_args() -> argparse.Namespace:
@@ -195,63 +195,44 @@ def main():
         elapsed_time = time.time() - start_time
         logging.info("Epoch: %d - Time elapsed: %.3f" % (epoch, elapsed_time))
 
-        # Report loss over training set and elapsed time to stderr + wandb
-        with torch.no_grad():
-            loss_accumulator = []
-            for idx, (sample_batch, _) in enumerate(train_loader):
-                sample_batch = sample_batch.to(_DEVICE_)
-                y = measurement_process(sample_batch)
-                reconstruction = solver(y, iterations=args.num_solver_iterations)
-                reconstruction = torch.clamp(reconstruction, -1, 1)
-                # Append loss to accumulator
-                loss_accumulator.append(
-                    lossfunction(reconstruction, sample_batch).item()
-                )
-            loss_array = np.asarray(loss_accumulator)
-            loss_mse = np.mean(loss_array)
-            train_psnr = -10 * np.log10(loss_mse)
-            percentiles_psnr = -10 * np.log10(np.percentile(loss_array, [25, 50, 75]))
-            logging.info("Train MSE: %f - Train mean PSNR: %f" % (loss_mse, train_psnr))
-            logging.info(
-                "Train PSNR quartiles: %.2f, %.2f, %.2f" % tuple(percentiles_psnr)
-            )
-            run.log(
-                {
-                    "epoch": epoch,
-                    "train_loss": loss_mse,
-                    "train_psnr_mean": train_psnr,
-                    "train_psnr_quartiles": tuple(percentiles_psnr),
-                    "elapsed_time": elapsed_time,
-                    "elapsed_time_per_batch": elapsed_time / total_batches,
-                    "save_path": os.path.join(
-                        args.save_location, f"{hash_dict(vars(args))}_{epoch}.pt"
-                    ),
-                }
-            )
+        # Report loss over training/test sets and elapsed time to stderr + wandb
+        train_loss = evaluate_batch_loss(
+            solver,
+            lossfunction,
+            measurement_process,
+            train_loader,
+            device=_DEVICE_,
+            iterations=args.num_solver_iterations,
+        )
+        test_loss = evaluate_batch_loss(
+            solver,
+            lossfunction,
+            measurement_process,
+            test_loader,
+            device=_DEVICE_,
+            iterations=args.num_solver_iterations,
+        )
+        psnr_train = -10 * np.log10(train_loss)
+        psnr_test = -10 * np.log10(test_loss)
+        logging.info("Train MSE: %f - Train mean PSNR: %f" % (train_loss, psnr_train))
+        logging.info("Test MSE: %f - Test mean PSNR: %f" % (test_loss, psnr_test))
+        run.log(
+            {
+                "epoch": epoch,
+                "train_loss": train_loss,
+                "test_loss": test_loss,
+                "train_psnr_mean": psnr_train,
+                "test_psnr_mean": psnr_test,
+                "elapsed_time": elapsed_time,
+                "elapsed_time_per_batch": elapsed_time / total_batches,
+                "save_path": os.path.join(
+                    args.save_location, f"{hash_dict(vars(args))}_{epoch}.pt"
+                ),
+            }
+        )
 
         if scheduler is not None:
             scheduler.step()
-
-    # Evaluation
-    loss_accumulator = []
-    with torch.no_grad():
-        for _, (sample_batch, _) in enumerate(test_loader):
-            sample_batch = sample_batch.to(device=_DEVICE_)
-            y = measurement_process(sample_batch)
-            reconstruction = solver(y, iterations=args.num_solver_iterations)
-            reconstruction = torch.clamp(reconstruction, -1, 1)
-
-            # Evalute loss function
-            loss = lossfunction(reconstruction, sample_batch)
-            loss_accumulator.append(loss.item())
-
-    loss_array = np.asarray(loss_accumulator)
-    loss_mse = np.mean(loss_array)
-    PSNR = -10 * np.log10(loss_mse)
-    percentiles = np.percentile(loss_array, [25, 50, 75])
-    percentiles = -10.0 * np.log10(percentiles)
-    logging.info("Test loss: %f - Test mean PSNR: %f" % (loss_mse, PSNR))
-    logging.info("Test PSNR quartiles: %f, %f, %f" % tuple(percentiles))
 
 
 if __name__ == "__main__":

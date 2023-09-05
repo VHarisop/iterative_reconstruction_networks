@@ -151,7 +151,7 @@ class SketchedNeumannNet(nn.Module):
     rank: int
     linear_op: LinearOperator
     nonlinear_op: nn.Module
-    eta: nn.Module | torch.Tensor
+    eta: torch.Tensor
     sketch_op: NystromApproxBlur | NystromApproxBlurGaussian
     sketch_inverse_op: NystromApproxBlurInverse
 
@@ -221,7 +221,7 @@ class RPCholeskyPrecondNeumannNet(nn.Module):
     nystrom_preconditioner: NystromPreconditioner
     nonlinear_op: nn.Module
     cg_iterations: int
-    eta: nn.Module | torch.Tensor
+    eta: torch.Tensor
 
     def __init__(
         self,
@@ -284,7 +284,7 @@ class RPCholeskyPrecondNeumannNet(nn.Module):
         preconditioned_step = self._solve_system(input_tensor)
         return self.eta * preconditioned_step - self.nonlinear_op(input_tensor)
 
-    def forward(self, y, iterations):
+    def forward(self, y: torch.Tensor, iterations: int):
         initial_point = self._solve_system(
             self._linear_adjoint(y),
         )

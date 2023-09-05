@@ -1,3 +1,5 @@
+import abc
+
 import torch
 
 
@@ -5,10 +7,12 @@ class LinearOperator(torch.nn.Module):
     def __init__(self):
         super(LinearOperator, self).__init__()
 
-    def forward(self, x):
+    @abc.abstractmethod
+    def forward(self, x) -> torch.Tensor:
         pass
 
-    def adjoint(self, x):
+    @abc.abstractmethod
+    def adjoint(self, x) -> torch.Tensor:
         pass
 
     def gramian(self, x):

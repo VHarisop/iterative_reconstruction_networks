@@ -11,7 +11,7 @@ from operators.operator import LinearOperator
 def evaluate_batch_loss(
     solver: torch.nn.Module,
     loss_fn: torch.nn.Module,
-    measurement_operator: LinearOperator,
+    measurement_operator: torch.nn.Module,
     data_loader: DataLoader,
     device: torch.device,
     **solver_kwargs,
@@ -31,7 +31,7 @@ def evaluate_batch_loss(
         The batch loss on the dataset."""
     loss = 0.0
     num_batches = 0
-    for idx, (sample_batch, _) in enumerate(data_loader):
+    for sample_batch, _ in data_loader:
         num_batches += 1
         sample_batch = sample_batch.to(device)
         y = measurement_operator(sample_batch)

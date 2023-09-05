@@ -153,12 +153,12 @@ class NystromApproxBlurInverse(SelfAdjointLinearOperator):
     """
 
     nystrom_approx_blur: NystromApproxBlur | NystromApproxBlurGaussian
-    reg_lambda: float | torch.Tensor
+    reg_lambda: torch.Tensor | torch.nn.Parameter
 
     def __init__(
         self,
         nystrom_approx_blur: NystromApproxBlur | NystromApproxBlurGaussian,
-        reg_lambda: float | torch.Tensor | torch.nn.Parameter,
+        reg_lambda: torch.Tensor | torch.nn.Parameter,
     ):
         super().__init__()
         self.nystrom_approx_blur = nystrom_approx_blur

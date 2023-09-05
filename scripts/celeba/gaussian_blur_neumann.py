@@ -229,24 +229,25 @@ def main():
         logging.info("Epoch: %d - Time elapsed: %.3f" % (epoch, elapsed_time))
 
         # Report loss over training/test sets and elapsed time to stderr + wandb
-        train_loss = evaluate_batch_loss(
-            solver,
-            lossfunction,
-            measurement_process,
-            train_loader,
-            device=_DEVICE_,
-            iterations=args.num_solver_iterations,
-        )
-        test_loss = evaluate_batch_loss(
-            solver,
-            lossfunction,
-            measurement_process,
-            test_loader,
-            device=_DEVICE_,
-            iterations=args.num_solver_iterations,
-        )
-        psnr_train = -10 * np.log10(train_loss)
-        psnr_test = -10 * np.log10(test_loss)
+        with torch.no_grad():
+            train_loss = evaluate_batch_loss(
+                solver,
+                lossfunction,
+                measurement_process,
+                train_loader,
+                device=_DEVICE_,
+                iterations=args.num_solver_iterations,
+            )
+            test_loss = evaluate_batch_loss(
+                solver,
+                lossfunction,
+                measurement_process,
+                test_loader,
+                device=_DEVICE_,
+                iterations=args.num_solver_iterations,
+            )
+            psnr_train = -10 * np.log10(train_loss)
+            psnr_test = -10 * np.log10(test_loss)
         logging.info("Train MSE: %f - Train mean PSNR: %f" % (train_loss, psnr_train))
         logging.info("Test MSE: %f - Test mean PSNR: %f" % (test_loss, psnr_test))
         run.log(

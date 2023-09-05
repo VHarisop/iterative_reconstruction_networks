@@ -12,7 +12,12 @@ import operators.nystrom as nystrom
 import wandb
 from networks.u_net import UnetModel
 from operators.operator import OperatorPlusNoise
-from solvers.neumann import NeumannNet, PrecondNeumannNet, SketchedNeumannNet
+from solvers.neumann import (
+    NeumannNet,
+    PrecondNeumannNet,
+    RPCholeskyPrecondNeumannNet,
+    SketchedNeumannNet,
+)
 from utils.cifar_10_dataloader import create_dataloaders, create_datasets
 from utils.parsing import setup_common_parser
 from utils.train_utils import evaluate_batch_loss, hash_dict
@@ -53,6 +58,26 @@ def setup_args() -> argparse.Namespace:
         type=str,
         default="column",
     )
+    parser_rpcholneumann = subparsers.add_parser(
+        "rpcholneumann",
+        help="A Nystrom-preconditioned Neumann network",
+    )
+    parser_rpcholneumann.add_argument(
+        "--sketch_type", choices=["gaussian", "column"], type=str, default="column"
+    )
+    parser_rpcholneumann.add_argument(
+        "--rank",
+        help="The rank of the Nystrom approximation",
+        type=int,
+        required=True,
+    )
+    parser_rpcholneumann.add_argument(
+        "--cg_iterations",
+        help="The number of (preconditioned) CG iterations",
+        type=int,
+        default=10,
+    )
+
     return parser.parse_args()
 
 
@@ -121,7 +146,7 @@ def main():
             lambda_initial_val=args.algorithm_step_size,
             cg_iterations=args.cg_iterations,
         )
-    elif args.solver == "sketchedneumann":
+    elif args.solver in ["sketchedneumann", "rpcholneumann"]:
         if args.sketch_type == "column":
             sketched_operator = nystrom.NystromApproxBlur(
                 lin_op=internal_forward_operator,
@@ -135,12 +160,21 @@ def main():
                 dim=32,
                 rank=args.rank,
             )
-        solver = SketchedNeumannNet(
-            linear_operator=internal_forward_operator,
-            sketched_operator=sketched_operator,
-            nonlinear_operator=learned_component,
-            lambda_initial_val=args.algorithm_step_size,
-        )
+        if args.solver == "sketchedneumann":
+            solver = SketchedNeumannNet(
+                linear_operator=internal_forward_operator,
+                sketched_operator=sketched_operator,
+                nonlinear_operator=learned_component,
+                lambda_initial_val=args.algorithm_step_size,
+            )
+        else:
+            solver = RPCholeskyPrecondNeumannNet(
+                linear_operator=internal_forward_operator,
+                nystrom_op=sketched_operator,
+                nonlinear_operator=learned_component,
+                lambda_initial_val=args.algorithm_step_size,
+                cg_iterations=args.cg_iterations,
+            )
     else:
         solver = NeumannNet(
             linear_operator=internal_forward_operator,
@@ -196,24 +230,25 @@ def main():
         logging.info("Epoch: %d - Time elapsed: %.3f" % (epoch, elapsed_time))
 
         # Report loss over training/test sets and elapsed time to stderr + wandb
-        train_loss = evaluate_batch_loss(
-            solver,
-            lossfunction,
-            measurement_process,
-            train_loader,
-            device=_DEVICE_,
-            iterations=args.num_solver_iterations,
-        )
-        test_loss = evaluate_batch_loss(
-            solver,
-            lossfunction,
-            measurement_process,
-            test_loader,
-            device=_DEVICE_,
-            iterations=args.num_solver_iterations,
-        )
-        psnr_train = -10 * np.log10(train_loss)
-        psnr_test = -10 * np.log10(test_loss)
+        with torch.no_grad():
+            train_loss = evaluate_batch_loss(
+                solver,
+                lossfunction,
+                measurement_process,
+                train_loader,
+                device=_DEVICE_,
+                iterations=args.num_solver_iterations,
+            )
+            test_loss = evaluate_batch_loss(
+                solver,
+                lossfunction,
+                measurement_process,
+                test_loader,
+                device=_DEVICE_,
+                iterations=args.num_solver_iterations,
+            )
+            psnr_train = -10 * np.log10(train_loss)
+            psnr_test = -10 * np.log10(test_loss)
         logging.info("Train MSE: %f - Train mean PSNR: %f" % (train_loss, psnr_train))
         logging.info("Test MSE: %f - Test mean PSNR: %f" % (test_loss, psnr_test))
         run.log(

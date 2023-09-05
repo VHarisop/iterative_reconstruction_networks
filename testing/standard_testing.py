@@ -1,5 +1,5 @@
-import torch
 import numpy as np
+import torch
 
 
 def test_solver(solver, test_dataloader, measurement_process, device="cpu"):

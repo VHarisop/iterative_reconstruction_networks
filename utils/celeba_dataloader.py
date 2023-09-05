@@ -1,11 +1,11 @@
+import os
 from random import sample
-
 from typing import Tuple
+
+import numpy as np
+import torchvision.transforms as transforms
 from torch.utils.data import DataLoader, Subset
 from torchvision.datasets import CelebA
-import torchvision.transforms as transforms
-import numpy as np
-import os
 
 
 def create_datasets(root_folder: str) -> Tuple[CelebA, CelebA]:

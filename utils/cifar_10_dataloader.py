@@ -1,10 +1,10 @@
+import os
 from random import sample
-
 from typing import Tuple
+
+import torchvision.transforms as transforms
 from torch.utils.data import DataLoader, Subset
 from torchvision.datasets import CIFAR10
-import torchvision.transforms as transforms
-import os
 
 
 def create_datasets(root_folder: str) -> Tuple[CIFAR10, CIFAR10]:

@@ -2,8 +2,12 @@ import torch
 import torch.nn as nn
 
 from operators.blurs import GaussianBlur
-from operators.nystrom import (NystromApproxBlur, NystromApproxBlurGaussian,
-                               NystromApproxBlurInverse, NystromPreconditioner)
+from operators.nystrom import (
+    NystromApproxBlur,
+    NystromApproxBlurGaussian,
+    NystromApproxBlurInverse,
+    NystromPreconditioner,
+)
 from operators.operator import LinearOperator
 from solvers.cg_utils import conjugate_gradient
 

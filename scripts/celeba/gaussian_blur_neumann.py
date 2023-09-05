@@ -6,13 +6,14 @@ import time
 import numpy as np
 import torch
 import torch.optim as optim
-import wandb
 
 import operators.blurs as blurs
 import operators.nystrom as nystrom
-from operators.operator import OperatorPlusNoise
+import wandb
 from networks.u_net import UnetModel
-from solvers.neumann import NeumannNet, PrecondNeumannNet, SketchedNeumannNet
+from operators.operator import OperatorPlusNoise
+from solvers.neumann import (NeumannNet, PrecondNeumannNet,
+                             RPCholeskyPrecondNeumannNet, SketchedNeumannNet)
 from utils.celeba_dataloader import create_dataloaders, create_datasets
 from utils.parsing import setup_common_parser
 from utils.train_utils import hash_dict
@@ -52,6 +53,25 @@ def setup_args() -> argparse.Namespace:
         choices=["gaussian", "column"],
         type=str,
         default="column",
+    )
+    parser_rpcholneumann = subparsers.add_parser(
+        "rpcholneumann",
+        help="A Nystrom-preconditioned Neumann network",
+    )
+    parser_rpcholneumann.add_argument(
+        "--sketch_type", choices=["gaussian", "column"], type=str, default="column"
+    )
+    parser_rpcholneumann.add_argument(
+        "--rank",
+        help="The rank of the Nystrom approximation",
+        type=int,
+        required=True,
+    )
+    parser_rpcholneumann.add_argument(
+        "--cg_iterations",
+        help="The number of (preconditioned) CG iterations",
+        type=int,
+        default=10,
     )
     return parser.parse_args()
 
@@ -121,7 +141,7 @@ def main():
             lambda_initial_val=args.algorithm_step_size,
             cg_iterations=args.cg_iterations,
         )
-    elif args.solver == "sketchedneumann":
+    elif args.solver in ["sketchedneumann", "rpcholneumann"]:
         if args.sketch_type == "column":
             sketched_operator = nystrom.NystromApproxBlur(
                 lin_op=internal_forward_operator,
@@ -135,12 +155,21 @@ def main():
                 dim=64,
                 rank=args.rank,
             )
-        solver = SketchedNeumannNet(
-            linear_operator=internal_forward_operator,
-            sketched_operator=sketched_operator,
-            nonlinear_operator=learned_component,
-            lambda_initial_val=args.algorithm_step_size,
-        )
+        if args.solver == "sketchedneumann":
+            solver = SketchedNeumannNet(
+                linear_operator=internal_forward_operator,
+                sketched_operator=sketched_operator,
+                nonlinear_operator=learned_component,
+                lambda_initial_val=args.algorithm_step_size,
+            )
+        else:
+            solver = RPCholeskyPrecondNeumannNet(
+                linear_operator=internal_forward_operator,
+                nystrom_op=sketched_operator,
+                nonlinear_operator=learned_component,
+                lambda_initial_val=args.algorithm_step_size,
+                cg_iterations=args.cg_iterations,
+            )
     else:
         solver = NeumannNet(
             linear_operator=internal_forward_operator,

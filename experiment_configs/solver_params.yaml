@@ -1,13 +1,21 @@
 - solver:
     - sketchedneumann
   rank:
-    - 8
     - 16
     - 32
   sketch_type:
-    - gaussian
     - column
 - solver:
     - precondneumann
   cg_iterations:
     - 10
+- solver:
+    - rpcholneumann
+  cg_iterations:
+    - 5
+    - 10
+  sketch_type:
+    - column
+  rank:
+    - 16
+    - 32

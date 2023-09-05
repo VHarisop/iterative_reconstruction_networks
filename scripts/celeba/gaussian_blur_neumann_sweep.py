@@ -63,6 +63,11 @@ def setup_args() -> argparse.Namespace:
         help="Set to use CUDA acceleration if available",
         action="store_true",
     )
+    parser.add_argument(
+        "--dry_run",
+        help="Set to only display configuration information and exit without submitting jobs",
+        action="store_true",
+    )
     return parser.parse_args()
 
 
@@ -99,6 +104,9 @@ def run_sweep():
         experiment_config = {**param_config, **solver_config}
         experiment_id = hash_dict(experiment_config)
         job_name = f"{args.wandb_project_name}_{experiment_id}"
+        if args.dry_run:
+            print(f"Experiment config: {experiment_config}")
+            continue
         # Create a slurm job
         slurm_job = Slurm(
             cpus_per_task=8,

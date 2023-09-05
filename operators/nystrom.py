@@ -231,6 +231,7 @@ class NystromPreconditioner(SelfAdjointLinearOperator):
     scale_vec: torch.Tensor
     dim: int
 
+    @torch.no_grad()
     def __init__(
         self, nys_op: NystromApproxBlur | NystromApproxBlurGaussian, mu: torch.Tensor
     ):

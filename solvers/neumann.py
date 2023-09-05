@@ -231,7 +231,7 @@ class RPCholeskyPrecondNeumannNet(nn.Module):
         lambda_initial_val=0.1,
         cg_iterations=10,
     ):
-        super(PrecondNeumannNet, self).__init__()
+        super(RPCholeskyPrecondNeumannNet, self).__init__()
         self.linear_op = linear_operator
         self.nonlinear_op = nonlinear_operator
         self.cg_iterations = cg_iterations

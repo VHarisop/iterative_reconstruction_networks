@@ -69,7 +69,7 @@ class PrecondNeumannNet(nn.Module):
     linear_op: LinearOperator
     nonlinear_op: nn.Module
     cg_iterations: int
-    eta: nn.Module | torch.Tensor
+    eta: torch.Tensor
 
     def __init__(
         self,

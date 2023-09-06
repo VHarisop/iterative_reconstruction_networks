@@ -147,6 +147,13 @@ class NystromApproxBlur(SelfAdjointLinearOperator):
 class NystromApproxBlurInverse(SelfAdjointLinearOperator):
     """The inverse of a regularized Nystrom approximation.
 
+    This linear operator implements the mapping
+
+        z -> (X'X + reg_lambda * I)^{-1},
+
+    where `X'X` is approximated using a provided `NystromApproxBlur` or
+    `NystromApproxBlurGaussian` object.
+
     Attributes:
         nystrom_approx_blur: The Nystrom approximation.
         reg_lambda: The regularization constant.

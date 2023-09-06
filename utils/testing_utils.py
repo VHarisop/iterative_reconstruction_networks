@@ -1,8 +1,62 @@
-from PIL import Image
-import torch
+from itertools import product
+
+import imageio
 import matplotlib.pyplot as plt
 import numpy as np
-import imageio
+import torch
+
+from operators.blurs import GaussianBlur
+from operators.operator import SelfAdjointLinearOperator
+
+
+class RegBlurInverse(SelfAdjointLinearOperator):
+    def __init__(self, blur: GaussianBlur, dim: int):
+        super().__init__()
+        self.dim = dim
+        with torch.no_grad():
+            _, S, Vh = torch.linalg.svd(
+                blur.conv_with_bases(
+                    dim, indices=list(product(range(dim), range(dim)))
+                ).view(dim**2, dim**2),
+                full_matrices=False,
+            )
+            self.singular_values = S
+            self.singular_vectors = Vh
+
+    def forward(self, x: torch.Tensor, reg_lambda: torch.Tensor) -> torch.Tensor:
+        orig_size = x.size()
+        # Reshape x so that the last dimension is the flattened image.
+        z = x.view(*orig_size[:-2], self.dim**2)
+        return (
+            (
+                (z @ self.singular_vectors)
+                * (1 / (self.singular_values**2 + reg_lambda))
+            )
+            @ self.singular_vectors.T
+        ).view(orig_size)
+
+
+def compute_blur_inverse(
+    blur: GaussianBlur, shift: torch.Tensor, dim: int
+) -> torch.Tensor:
+    """Compute the inverse of a GaussianBlur (viewed as a matrix).
+
+    Args:
+        blur: The Gaussian blur.
+        shift: The diagonal shift.
+        dim: The number of rows/columns of the images the blur is applied to.
+
+    Returns:
+        A LinearOperator that wraps the inverse.
+    """
+    # Create a full basis.
+    fwd_matrix = blur.conv_with_bases(
+        dim,
+        indices=list(product(range(dim), range(dim))),
+    )
+    fwd_matrix = fwd_matrix.view(dim**2, dim**2)
+    full_matrix = fwd_matrix.T @ fwd_matrix + shift * torch.eye(dim**2)
+    return torch.linalg.inv(full_matrix)
 
 
 def save_tensor_as_color_img(img_tensor, filename):

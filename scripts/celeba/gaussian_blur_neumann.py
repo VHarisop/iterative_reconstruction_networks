@@ -11,7 +11,7 @@ import operators.blurs as blurs
 import operators.nystrom as nystrom
 import wandb
 from networks.u_net import UnetModel
-from operators.operator import OperatorPlusNoise
+from operators.operator import LinearOperator, OperatorPlusNoise
 from solvers.neumann import (
     NeumannNet,
     PrecondNeumannNet,
@@ -20,7 +20,47 @@ from solvers.neumann import (
 )
 from utils.celeba_dataloader import create_dataloaders, create_datasets
 from utils.parsing import setup_common_parser
+from utils.testing_utils import RegBlurInverse
 from utils.train_utils import evaluate_batch_loss, hash_dict
+
+
+class ExactPrecondNeumannNet(torch.nn.Module):
+    """A PrecondNeumannNet using exact matrix inversions.
+
+    Backward passes through this module are likely to be too costly."""
+
+    linear_op: LinearOperator
+    nonlinear_op: torch.nn.Module
+    eta: torch.Tensor
+    cached_blur_inverse: RegBlurInverse
+
+    def __init__(
+        self,
+        base_net: PrecondNeumannNet | SketchedNeumannNet | RPCholeskyPrecondNeumannNet,
+        cached_blur_inverse: RegBlurInverse,
+    ):
+        super().__init__()
+        self.linear_op = base_net.linear_op
+        self.nonlinear_op = base_net.nonlinear_op
+        self.eta = base_net.eta
+        self.cached_blur_inverse = cached_blur_inverse
+
+    def forward(self, y: torch.Tensor, iterations: int) -> torch.Tensor:
+        initial_point = self.cached_blur_inverse.forward(
+            self.linear_op.adjoint(y),
+            self.eta,
+        )
+        running_term = initial_point
+        accumulator = initial_point
+
+        for _ in range(iterations):
+            running_term = self.eta * self.cached_blur_inverse.forward(
+                running_term,
+                self.eta,
+            ) - self.nonlinear_op(running_term)
+            accumulator = accumulator + running_term
+
+        return accumulator
 
 
 def setup_args() -> argparse.Namespace:
@@ -30,6 +70,11 @@ def setup_args() -> argparse.Namespace:
         help="The variance of the measurement noise",
         type=float,
         default=0.0,
+    )
+    parser.add_argument(
+        "--report_inversion_error",
+        help="Set to report the error of inverting T_λ",
+        action="store_true",
     )
     # Create subparsers
     subparsers = parser.add_subparsers(help="The network type", dest="solver")
@@ -191,6 +236,12 @@ def main():
     # set up loss and train
     lossfunction = torch.nn.MSELoss()
 
+    if args.report_inversion_error:
+        blur_inverse = RegBlurInverse(
+            blur=internal_forward_operator,
+            dim=64,
+        )
+
     # Training
     for epoch in range(args.num_epochs):
         if epoch % args.save_frequency == 0:
@@ -207,6 +258,7 @@ def main():
                 ),
             )
         total_batches = 0
+        total_reconstruction_error = 0.0
         start_time = time.time()
         for idx, (sample_batch, _) in enumerate(train_loader):
             optimizer.zero_grad()
@@ -215,6 +267,28 @@ def main():
             # Reconstruct image using `num_solver_iterations` unrolled iterations.
             reconstruction = solver(y, iterations=args.num_solver_iterations)
             reconstruction = torch.clamp(reconstruction, -1, 1)
+
+            if args.report_inversion_error and isinstance(
+                solver,
+                PrecondNeumannNet | SketchedNeumannNet | RPCholeskyPrecondNeumannNet,
+            ):
+                # Create a solver ExactPrecondNeumannNet
+                # that performs a forward pass using the exact inversion
+                # formula. Then compare how far `reconstruction` is from
+                # the output of ExactPrecondNeumannNet.
+                with torch.no_grad():
+                    exact_net = ExactPrecondNeumannNet(
+                        solver,
+                        blur_inverse,
+                    )
+                    reconstruction_exact = exact_net.forward(
+                        y, iterations=args.num_solver_iterations
+                    )
+                    reconstruction_exact = torch.clamp(reconstruction_exact, -1, 1)
+                    reconstruction_error = torch.linalg.norm(
+                        reconstruction - reconstruction_exact
+                    ) / torch.linalg.norm(reconstruction_exact)
+                    total_reconstruction_error += reconstruction_error.item() ** 2
 
             # Evaluate loss function and take gradient step.
             loss = lossfunction(reconstruction, sample_batch)
@@ -248,6 +322,16 @@ def main():
             )
             psnr_train = -10 * np.log10(train_loss)
             psnr_test = -10 * np.log10(test_loss)
+            if args.report_inversion_error and isinstance(
+                solver,
+                PrecondNeumannNet | SketchedNeumannNet | RPCholeskyPrecondNeumannNet,
+            ):
+                avg_inversion_error = np.sqrt(
+                    total_reconstruction_error / total_batches
+                )
+            else:
+                avg_inversion_error = None
+        # Report summary statistics to stderr + wandb
         logging.info("Train MSE: %f - Train mean PSNR: %f" % (train_loss, psnr_train))
         logging.info("Test MSE: %f - Test mean PSNR: %f" % (test_loss, psnr_test))
         run.log(
@@ -262,6 +346,7 @@ def main():
                 "save_path": os.path.join(
                     args.save_location, f"{hash_dict(vars(args))}_{epoch}.pt"
                 ),
+                "avg_inversion_error": avg_inversion_error,
             }
         )
 

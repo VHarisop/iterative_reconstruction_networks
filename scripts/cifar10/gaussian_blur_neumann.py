@@ -270,7 +270,8 @@ def main():
             reconstruction = torch.clamp(reconstruction, -1, 1)
 
             if args.report_inversion_error and isinstance(
-                solver, PrecondNeumannNet | SketchedNeumannNet
+                solver,
+                PrecondNeumannNet | SketchedNeumannNet | RPCholeskyPrecondNeumannNet,
             ):
                 # Create a solver ExactPrecondNeumannNet
                 # that performs a forward pass using the exact inversion
@@ -323,7 +324,8 @@ def main():
             psnr_train = -10 * np.log10(train_loss)
             psnr_test = -10 * np.log10(test_loss)
             if args.report_inversion_error and isinstance(
-                solver, PrecondNeumannNet | SketchedNeumannNet
+                solver,
+                PrecondNeumannNet | SketchedNeumannNet | RPCholeskyPrecondNeumannNet,
             ):
                 avg_inversion_error = np.sqrt(
                     total_reconstruction_error / total_batches

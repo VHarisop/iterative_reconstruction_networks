@@ -18,7 +18,6 @@ from solvers.neumann import (
     RPCholeskyPrecondNeumannNet,
     SketchedNeumannNet,
 )
-from utils.cifar_10_dataloader import create_dataloaders, create_datasets
 from utils.parsing import setup_common_parser
 from utils.testing_utils import RegBlurInverse
 from utils.train_utils import evaluate_batch_loss, hash_dict
@@ -65,12 +64,6 @@ class ExactPrecondNeumannNet(torch.nn.Module):
 
 def setup_args() -> argparse.Namespace:
     parser = setup_common_parser()
-    parser.add_argument(
-        "--noise_variance",
-        help="The variance of the measurement noise",
-        type=float,
-        default=0.0,
-    )
     parser.add_argument(
         "--report_inversion_error",
         help="Set to report the error of inverting T_λ",
@@ -136,6 +129,9 @@ def main():
     else:
         _DEVICE_ = torch.device("cpu")
 
+    # Dimension of images
+    _DIM_ = 32 if args.dataset == "cifar10" else 64
+
     # Set up logging
     logging.basicConfig(
         level=(logging.DEBUG if args.verbose else logging.INFO),
@@ -155,6 +151,13 @@ def main():
     assert run is not None
 
     # Set up data and dataloaders
+    logging.debug(f"Dataset = {args.dataset}")
+    if args.dataset == "cifar10":
+        from utils.cifar_10_dataloader import create_dataloaders, create_datasets
+    elif args.dataset == "celeba":
+        from utils.celeba_dataloader import create_dataloaders, create_datasets
+    else:
+        raise ValueError(f"Unknown value {args.dataset} for dataset")
     train_data, test_data = create_datasets(args.data_folder)
     train_loader, test_loader = create_dataloaders(
         train_data,
@@ -162,7 +165,7 @@ def main():
         batch_size=args.batch_size,
         num_train_samples=args.num_train_samples,
     )
-    logging.info(f"Using {args.num_train_samples} samples")
+    logging.debug(f"Using {args.num_train_samples} samples")
 
     # Set up solver
     internal_forward_operator = blurs.GaussianBlur(
@@ -195,14 +198,14 @@ def main():
         if args.sketch_type == "column":
             sketched_operator = nystrom.NystromApproxBlur(
                 lin_op=internal_forward_operator,
-                dim=32,
+                dim=_DIM_,
                 rank=args.rank,
                 pivots=None,
             )
         else:
             sketched_operator = nystrom.NystromApproxBlurGaussian(
                 lin_op=internal_forward_operator,
-                dim=32,
+                dim=_DIM_,
                 rank=args.rank,
             )
         if args.solver == "sketchedneumann":
@@ -238,9 +241,16 @@ def main():
     lossfunction = torch.nn.MSELoss()
 
     if args.report_inversion_error:
+        # Kill the process if the solver does not use inversion.
+        if not isinstance(
+            solver, PrecondNeumannNet | SketchedNeumannNet | RPCholeskyPrecondNeumannNet
+        ):
+            raise ValueError(
+                f"Cannot report inversion error when solver = {type(solver)}"
+            )
         blur_inverse = RegBlurInverse(
             blur=internal_forward_operator,
-            dim=32,
+            dim=_DIM_,
         )
 
     # Training
@@ -290,6 +300,8 @@ def main():
                         reconstruction - reconstruction_exact
                     ) / torch.linalg.norm(reconstruction_exact)
                     total_reconstruction_error += reconstruction_error.item() ** 2
+            else:
+                reconstruction_error = torch.Tensor([0.0])
 
             # Evaluate loss function and take gradient step.
             loss = lossfunction(reconstruction, sample_batch)
@@ -297,7 +309,10 @@ def main():
             optimizer.step()
 
             # Log to stderr
-            logging.info("Epoch: %d - Step: %d - Loss: %f" % (epoch, idx, loss.item()))
+            logging.info(
+                "Epoch: %d - Step: %d - Loss: %f - Inversion error: %f"
+                % (epoch, idx, loss.item(), reconstruction_error.item())
+            )
             total_batches += 1
         # Compute elapsed time
         elapsed_time = time.time() - start_time
@@ -331,9 +346,12 @@ def main():
                     total_reconstruction_error / total_batches
                 )
             else:
-                avg_inversion_error = None
+                avg_inversion_error = 0.0
         # Report summary statistics to stderr + wandb
-        logging.info("Train MSE: %f - Train mean PSNR: %f" % (train_loss, psnr_train))
+        logging.info(
+            "Train MSE: %f - Train mean PSNR: %f - Inversion error (avg): %f"
+            % (train_loss, psnr_train, avg_inversion_error)
+        )
         logging.info("Test MSE: %f - Test mean PSNR: %f" % (test_loss, psnr_test))
         run.log(
             {

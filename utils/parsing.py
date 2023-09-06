@@ -55,6 +55,13 @@ def setup_common_parser() -> argparse.ArgumentParser:
         choices=["online", "offline", "disabled"],
         default="disabled",
     )
+    parser.add_argument(
+        "--dataset",
+        help="The dataset to use",
+        type=str,
+        choices=["cifar10", "celeba"],
+        required=True,
+    )
     parser.add_argument("--data_folder", help="Root folder for the dataset", type=str)
     parser.add_argument(
         "--num_train_samples",
@@ -73,6 +80,12 @@ def setup_common_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--kernel_size", help="The size of the blur kernel", type=int, default=5
+    )
+    parser.add_argument(
+        "--noise_variance",
+        help="The variance of the measurement noise",
+        type=float,
+        default=0.0,
     )
     parser.add_argument("--batch_size", help="The batch size", type=int, default=64)
     parser.add_argument(

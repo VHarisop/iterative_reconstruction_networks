@@ -12,10 +12,11 @@ from utils.train_utils import hash_dict
 
 def setup_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run a neumann network training sweep")
+    # slurm options
     parser.add_argument(
         "--path_to_script",
-        help="Path to the script (default: scripts/celeba/gaussian_blur_neumann.py)",
-        default="scripts/celeba/gaussian_blur_neumann.py",
+        help="Path to the script (default: scripts/real/gaussian_blur_neumann.py)",
+        default="scripts/real/gaussian_blur_neumann.py",
     )
     parser.add_argument(
         "--slurm_log_folder_base",
@@ -23,10 +24,17 @@ def setup_args() -> argparse.Namespace:
         type=str,
     )
     parser.add_argument(
-        "--wandb_entity",
-        help="The wandb entity (default: vchariso-lab)",
+        "--slurm_partition",
+        help="The Slurm partition to target when submitting jobs (default: general)",
         type=str,
-        default="vchariso-lab",
+        default="general",
+    )
+    # wandb options
+    parser.add_argument(
+        "--wandb_entity",
+        help="The wandb entity (default: vchariso)",
+        type=str,
+        default="vchariso",
     )
     parser.add_argument(
         "--wandb_project_name", help="The wandb project name", type=str, required=True
@@ -34,6 +42,7 @@ def setup_args() -> argparse.Namespace:
     parser.add_argument(
         "--wandb_mode", choices=["online", "offline", "disabled"], default="offline"
     )
+    # config file paths
     parser.add_argument(
         "--solver_param_config_file",
         help="Path to the solver param config file",
@@ -44,6 +53,14 @@ def setup_args() -> argparse.Namespace:
         "--common_param_config_file",
         help="Path to the common param config file",
         type=str,
+        required=True,
+    )
+    # dataset and location
+    parser.add_argument(
+        "--dataset",
+        help="The dataset to use",
+        type=str,
+        choices=["cifar10", "celeba"],
         required=True,
     )
     parser.add_argument(
@@ -65,7 +82,7 @@ def setup_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--dry_run",
-        help="Set to only display configuration information and exit without submitting jobs",
+        help="Set to only print out the experiment configs tried",
         action="store_true",
     )
     return parser.parse_args()
@@ -82,6 +99,7 @@ def validate_common_experiment_config(config: Dict[str, Any]):
         "save_frequency",
         "algorithm_step_size",
         "noise_variance",
+        "report_inversion_error",
     }
     missing_keys = required_keys - set(config)
     if len(missing_keys) > 0:
@@ -104,9 +122,6 @@ def run_sweep():
         experiment_config = {**param_config, **solver_config}
         experiment_id = hash_dict(experiment_config)
         job_name = f"{args.wandb_project_name}_{experiment_id}"
-        if args.dry_run:
-            print(f"Experiment config: {experiment_config}")
-            continue
         # Create a slurm job
         slurm_job = Slurm(
             cpus_per_task=8,
@@ -116,7 +131,7 @@ def run_sweep():
             job_name=job_name,
             mem="8G",
             mail_type="FAIL",
-            partition="general",
+            partition=args.slurm_partition,
             time=datetime.timedelta(hours=4),
             mail_user="vchariso@uchicago.edu",
             output=os.path.join(
@@ -138,15 +153,17 @@ def run_sweep():
         solver_param_str = " ".join(
             "--{k}={v}".format(k=k, v=v) for k, v in solver_params.items()
         )
-        slurm_job.sbatch(
+        sbatch_str = (
             f"""PYTHONPATH=$(pwd) python {args.path_to_script} \
             --wandb_mode={args.wandb_mode} \
             --wandb_entity={args.wandb_entity} \
             --wandb_project_name={args.wandb_project_name} \
+            --dataset={args.dataset} \
             --data_folder={args.data_folder} \
             --save_location={args.save_location} \
-            {"--use_cuda" if args.use_cuda else ""} \
             --verbose \
+            {"--use_cuda" if args.use_cuda else ""} \
+            {"--report_inversion_error" if experiment_config["report_inversion_error"] else ""} \
             --num_train_samples={experiment_config["num_train_samples"]} \
             --num_epochs={experiment_config["num_epochs"]} \
             --num_solver_iterations={experiment_config["num_solver_iterations"]} \
@@ -156,8 +173,13 @@ def run_sweep():
             --save_frequency={experiment_config["save_frequency"]} \
             --algorithm_step_size={experiment_config["algorithm_step_size"]} \
             --noise_variance={experiment_config["noise_variance"]} \
-            {solver} {solver_param_str}""",
+            {solver} {solver_param_str}"""
         )
+        if args.dry_run:
+            print(sbatch_str)
+            continue
+
+        slurm_job.sbatch(sbatch_str)
 
 
 if __name__ == "__main__":

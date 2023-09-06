@@ -10,6 +10,18 @@ from operators.operator import SelfAdjointLinearOperator
 
 
 class RegBlurInverse(SelfAdjointLinearOperator):
+    """A class implementing the inverse of the linear operator
+
+        q -> X'(X(q)) + mu * q,
+
+    where `X` is a Gaussian blur acting on 2D images and `mu` is a
+    regularization parameter.
+    """
+
+    dim: int
+    singular_values: torch.Tensor
+    singular_vectors: torch.Tensor
+
     def __init__(self, blur: GaussianBlur, dim: int):
         super().__init__()
         self.dim = dim
@@ -21,7 +33,7 @@ class RegBlurInverse(SelfAdjointLinearOperator):
                 full_matrices=False,
             )
             self.singular_values = S
-            self.singular_vectors = Vh
+            self.singular_vectors = Vh.t()
 
     def forward(self, x: torch.Tensor, reg_lambda: torch.Tensor) -> torch.Tensor:
         orig_size = x.size()

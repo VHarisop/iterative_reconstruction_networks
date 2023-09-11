@@ -6,10 +6,10 @@ import time
 import numpy as np
 import torch
 import torch.optim as optim
+import wandb
 
 import operators.blurs as blurs
 import operators.nystrom as nystrom
-import wandb
 from networks.u_net import UnetModel
 from operators.operator import LinearOperator, OperatorPlusNoise
 from solvers.neumann import (
@@ -366,6 +366,7 @@ def main():
                     args.save_location, f"{hash_dict(vars(args))}_{epoch}.pt"
                 ),
                 "avg_inversion_error": avg_inversion_error,
+                "algorithm_step_size": solver.eta,
             }
         )
 

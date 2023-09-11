@@ -1,0 +1,12 @@
+- solver:
+    - sketchedneumann
+  rank:
+    - 16
+    - 64
+    - 256
+  sketch_type:
+    - column
+- solver:
+    - precondneumann
+  cg_iterations:
+    - 10

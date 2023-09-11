@@ -1,0 +1,21 @@
+num_train_samples:
+  - 10000
+num_epochs:
+  - 50
+num_solver_iterations:
+  - 6
+kernel_size:
+  - 5
+batch_size:
+  - 16
+  - 64
+algorithm_step_size:
+  - 0.1
+learning_rate:
+  - 0.001
+save_frequency:
+  - 5
+noise_variance:
+  - 0.0
+report_inversion_error:
+  - true

@@ -347,6 +347,7 @@ def main():
                 )
             else:
                 avg_inversion_error = 0.0
+            algorithm_step_size = solver.eta.item()
         # Report summary statistics to stderr + wandb
         logging.info(
             "Train MSE: %f - Train mean PSNR: %f - Inversion error (avg): %f"
@@ -366,7 +367,7 @@ def main():
                     args.save_location, f"{hash_dict(vars(args))}_{epoch}.pt"
                 ),
                 "avg_inversion_error": avg_inversion_error,
-                "algorithm_step_size": solver.eta,
+                "algorithm_step_size": algorithm_step_size,
             }
         )
 

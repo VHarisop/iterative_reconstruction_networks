@@ -6,12 +6,17 @@ from PIL import Image
 from torch.utils.data import Dataset
 from utils import forward_models_mri
 
+
 def directory_filelist(target_directory):
-    file_list = [f for f in os.listdir(target_directory)
-                 if os.path.isfile(os.path.join(target_directory, f))]
+    file_list = [
+        f
+        for f in os.listdir(target_directory)
+        if os.path.isfile(os.path.join(target_directory, f))
+    ]
     file_list = list(file_list)
-    file_list = [f for f in file_list if not f.startswith('.')]
+    file_list = [f for f in file_list if not f.startswith(".")]
     return file_list
+
 
 def to_tensor(data):
     """
@@ -25,6 +30,7 @@ def to_tensor(data):
     if np.iscomplexobj(data):
         data = np.stack((data.real, data.imag), axis=-1)
     return torch.from_numpy(data)
+
 
 def center_crop_slice(data, shape):
     """
@@ -45,6 +51,7 @@ def center_crop_slice(data, shape):
     h_to = h_from + shape[1]
     return data[w_from:w_to, h_from:h_to, ...]
 
+
 def complex_abs(data):
     """
     Compute the absolute value of a complex valued input tensor.
@@ -55,10 +62,13 @@ def complex_abs(data):
         torch.Tensor: Absolute value of data
     """
     assert data.size(-1) == 2
-    return (data ** 2).sum(dim=-1).sqrt()
+    return (data**2).sum(dim=-1).sqrt()
+
 
 class singleCoilFastMRIDataloader(Dataset):
-    def __init__(self, dataset_location, transform=None, data_indices=None, sketchynormalize=True):
+    def __init__(
+        self, dataset_location, transform=None, data_indices=None, sketchynormalize=True
+    ):
         """
         Args:
             mask_func (common.subsample.MaskFunc): A function that can create a mask of
@@ -105,13 +115,14 @@ class singleCoilFastMRIDataloader(Dataset):
                 std (float): Standard deviation value used for normalization.
         """
         filename = self.filelist[item]
-        data = h5py.File(self.data_directory + filename, 'r')
+        data = h5py.File(self.data_directory + filename, "r")
         print(str(item) + ": " + str(filename))
 
-        kspace = to_tensor(data.get('kspace').value)
+        kspace = to_tensor(data.get("kspace").value)
         image_space = forward_models_mri.ifft2(kspace)
-        image_space = center_crop_slice(image_space, shape=[320, 320]).permute((2,0,1))
-
+        image_space = center_crop_slice(image_space, shape=[320, 320]).permute(
+            (2, 0, 1)
+        )
 
         if self.sketchynormalize:
             # don't ask
@@ -119,6 +130,5 @@ class singleCoilFastMRIDataloader(Dataset):
             image_space *= 2000
 
             image_space = image_space.clamp(min=-1, max=1)
-
 
         return image_space

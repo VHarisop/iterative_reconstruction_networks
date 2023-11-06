@@ -5,7 +5,8 @@ from typing import Sequence, Tuple
 import torch
 import torch.nn.functional as torchfunc
 
-from operators.operator import LinearOperator
+
+from neumann_networks.linalg import LinearOperator
 
 
 class GaussianBlur(LinearOperator):
@@ -26,13 +27,13 @@ class GaussianBlur(LinearOperator):
         )
 
     def create_gaussian_kernel(self, sigma, kernel_size, n_channels):
-        kernel = 1
+        kernel = torch.tensor(1.0)
         meshgrids = torch.meshgrid(
             [torch.arange(size, dtype=torch.float32) for size in kernel_size]
         )
         for size, mgrid in zip(kernel_size, meshgrids):
             mean = (size - 1) / 2
-            kernel *= torch.exp(-(((mgrid - mean) / sigma) ** 2) / 2)
+            kernel = kernel * torch.exp(-(((mgrid - mean) / sigma) ** 2) / 2)
 
         # Make sure norm of values in gaussian kernel equals 1.
         kernel = kernel / torch.sum(kernel)

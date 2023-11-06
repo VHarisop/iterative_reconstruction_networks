@@ -4,8 +4,6 @@ from typing import Dict
 import torch
 from torch.utils.data import DataLoader
 
-from operators.operator import LinearOperator
-
 
 @torch.no_grad()
 def evaluate_batch_loss(
